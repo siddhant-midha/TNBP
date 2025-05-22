@@ -2,11 +2,6 @@ function coordToIdx(i,j,dx,dy)
     (i - 1) * dy + j
 end
 
-function graph_to_edge_list(g)
-    edge_list = [(e.src, e.dst) for e in edges(g)]
-    return edge_list
-end
-
 # return a list of connected loops with origin (origin_x, origin_y) and has weight 4 
 # (origin_x, origin_y): origin of the loop, defined as the lower-left corner
 # (dx, dy): size of the PEPS
@@ -2084,49 +2079,53 @@ function ZCorrection4th(loopValue,dx,dy,g,messages,T,indmat,N)
     for origin_y = 1:dy, origin_x = 1:dx
         loop_l = loop4th(origin_x,origin_y,dx,dy)
         for loop in loop_l
-            dZ += loopValue(g,graph_to_edge_list(loop),messages,T,indmat,N)
+            dZ += loopValue(g,loop,messages,T,indmat,N)
         end
     end
 
     return dZ
 end
 
-function ZCorrection6th(loopValue, dx, dy, g, messages, T, indmat, N)
+# return the 6th order correction of Z
+# this assumes BP fixed point is normalized to 1
+# loopValue(loop): a function that inputs a loop and outputs its loop value
+function ZCorrection6th(dx,dy,g,messages,T,indmat,N)
     dZ = 0
     for origin_y = 1:dy, origin_x = 1:dx
-        loop_l = loop6th(origin_x, origin_y, dx, dy)
+        loop_l = loop6th(origin_x,origin_y,dx,dy)
         for loop in loop_l
-            dZ += loopValue(g, graph_to_edge_list(loop), messages, T, indmat, N)
+            dZ += loopValue(g,loop,messages,T,indmat,N)
         end
     end
+
     return dZ
 end
 
-function ZCorrection7th(loopValue, dx, dy, g, messages, T, indmat, N)
+function ZCorrection7th(dx, dy, g, messages, T, indmat, N)
     dZ = 0
     for origin_y = 1:dy, origin_x = 1:dx
         loop_l = loop7th(origin_x, origin_y, dx, dy)
         for loop in loop_l
-            dZ += loopValue(g, graph_to_edge_list(loop), messages, T, indmat, N)
+            dZ += loopValue(g, loop, messages, T, indmat, N)
         end
     end
     return dZ
 end
 
-function ZCorrection8th(loopValue, dx, dy, g, messages, T, indmat, N)
+function ZCorrection8th(dx, dy, g, messages, T, indmat, N)
     dZ = 0
 
     # one loop
     for origin_y = 1:dy, origin_x = 1:dx
         loop_l = loop8th(origin_x, origin_y, dx, dy)
         for loop in loop_l
-            dZ += loopValue(g, graph_to_edge_list(loop), messages, T, indmat, N)
+            dZ += loopValue(g, loop, messages, T, indmat, N)
         end
     end
 
     # two loops 4+4
     for origin_y1 = 1:dy, origin_x1 = 1:dx
-        for origin_y2 = origin_y1:dy, origin_x2 = origin_x1:dx
+        for origin_y2 = origin_y1:dy, origin_x1 = origin_x1:dx
             loop1_l = loop4th(origin_x1, origin_y1, dx, dy)
             loop2_l = loop4th(origin_x2, origin_y2, dx, dy)
             for loop1 in loop1_l, loop2 in loop2_l
@@ -2138,39 +2137,40 @@ function ZCorrection8th(loopValue, dx, dy, g, messages, T, indmat, N)
                     continue
                 end
 
-                dZ += loopValue(g, graph_to_edge_list(loop1), messages, T, indmat, N) * 
-                      loopValue(g, graph_to_edge_list(loop2), messages, T, indmat, N)
+                dZ += loopValue(g, loop1, messages, T, indmat, N) * loopValue(g, loop2, messages, T, indmat, N)
             end
         end
     end
     return dZ
 end
 
-function ZCorrection9th(loopValue, dx, dy, g, messages, T, indmat, N)
+function ZCorrection9th(dx, dy, g, messages, T, indmat, N)
     dZ = 0
+
+    # one loop
     for origin_y = 1:dy, origin_x = 1:dx
         loop_l = loop9th(origin_x, origin_y, dx, dy)
         for loop in loop_l
-            dZ += loopValue(g, graph_to_edge_list(loop), messages, T, indmat, N)
+            dZ += loopValue(g, loop, messages, T, indmat, N)
         end
     end
     return dZ
 end
 
-function ZCorrection10th(loopValue, dx, dy, g, messages, T, indmat, N)
+function ZCorrection10th(dx, dy, g, messages, T, indmat, N)
     dZ = 0
 
     # one loop
     for origin_y = 1:dy, origin_x = 1:dx
         loop_l = loop10th(origin_x, origin_y, dx, dy)
         for loop in loop_l
-            dZ += loopValue(g, graph_to_edge_list(loop), messages, T, indmat, N)
+            dZ += loopValue(g, loop, messages, T, indmat, N)
         end
     end
 
     # two loops 4+6
     for origin_y1 = 1:dy, origin_x1 = 1:dx
-        for origin_y2 = origin_y1:dy, origin_x2 = origin_x1:dx
+        for origin_y2 = origin_y1:dy, origin_x1 = origin_x1:dx
             loop1_l = loop4th(origin_x1, origin_y1, dx, dy)
             loop2_l = loop6th(origin_x2, origin_y2, dx, dy)
             for loop1 in loop1_l, loop2 in loop2_l
@@ -2182,8 +2182,7 @@ function ZCorrection10th(loopValue, dx, dy, g, messages, T, indmat, N)
                     continue
                 end
 
-                dZ += loopValue(g, graph_to_edge_list(loop1), messages, T, indmat, N) * 
-                      loopValue(g, graph_to_edge_list(loop2), messages, T, indmat, N)
+                dZ += loopValue(g, loop1, messages, T, indmat, N) * loopValue(g, loop2, messages, T, indmat, N)
             end
         end
     end
@@ -2198,18 +2197,21 @@ function logZCorrection4th(loopValue, dx, dy, g, messages, T, indmat, N)
     for origin_y = 1:dy, origin_x = 1:dx
         loop_l = loop4th(origin_x, origin_y, dx, dy)
         for loop in loop_l
-            dlogZ += loopValue(g, graph_to_edge_list(loop), messages, T, indmat, N)
+            dlogZ += loopValue(g, loop, messages, T, indmat, N)
         end
     end
     return dlogZ
 end
 
+# return the 6th order correction of logZ
+# this assumes BP fixed point is normalized to 1
+# loopValue(loop): a function that inputs a loop and outputs its loop value
 function logZCorrection6th(loopValue, dx, dy, g, messages, T, indmat, N)
     dlogZ = 0
     for origin_y = 1:dy, origin_x = 1:dx
         loop_l = loop6th(origin_x, origin_y, dx, dy)
         for loop in loop_l
-            dlogZ += loopValue(g, graph_to_edge_list(loop), messages, T, indmat, N)
+            dlogZ += loopValue(g, loop, messages, T, indmat, N)
         end
     end
     return dlogZ
@@ -2220,7 +2222,7 @@ function logZCorrection7th(loopValue, dx, dy, g, messages, T, indmat, N)
     for origin_y = 1:dy, origin_x = 1:dx
         loop_l = loop7th(origin_x, origin_y, dx, dy)
         for loop in loop_l
-            dlogZ += loopValue(g, graph_to_edge_list(loop), messages, T, indmat, N)
+            dlogZ += loopValue(g, loop, messages, T, indmat, N)
         end
     end
     return dlogZ
@@ -2231,13 +2233,13 @@ function logZCorrection8th(loopValue, dx, dy, g, messages, T, indmat, N)
     for origin_y = 1:dy, origin_x = 1:dx
         loop_l = loop8th(origin_x, origin_y, dx, dy)
         for loop in loop_l
-            dlogZ += loopValue(g, graph_to_edge_list(loop), messages, T, indmat, N)
+            dlogZ += loopValue(g, loop, messages, T, indmat, N)
         end
     end
 
     # two loops 4+4
     for origin_y1 = 1:dy, origin_x1 = 1:dx
-        for origin_y2 = origin_y1:dy, origin_x2 = origin_x1:dx
+        for origin_y2 = origin_y1:dy, origin_x1 = origin_x1:dx
             loop1_l = loop4th(origin_x1, origin_y1, dx, dy)
             loop2_l = loop4th(origin_x2, origin_y2, dx, dy)
             for loop1 in loop1_l, loop2 in loop2_l
@@ -2249,8 +2251,7 @@ function logZCorrection8th(loopValue, dx, dy, g, messages, T, indmat, N)
                     continue
                 end
 
-                dlogZ -= loopValue(g, graph_to_edge_list(loop1), messages, T, indmat, N) * 
-                         loopValue(g, graph_to_edge_list(loop2), messages, T, indmat, N) / 2
+                dlogZ -= loopValue(g, loop1, messages, T, indmat, N) * loopValue(g, loop2, messages, T, indmat, N) / 2
             end
         end
     end
@@ -2262,7 +2263,7 @@ function logZCorrection9th(loopValue, dx, dy, g, messages, T, indmat, N)
     for origin_y = 1:dy, origin_x = 1:dx
         loop_l = loop9th(origin_x, origin_y, dx, dy)
         for loop in loop_l
-            dlogZ += loopValue(g, graph_to_edge_list(loop), messages, T, indmat, N)
+            dlogZ += loopValue(g, loop, messages, T, indmat, N)
         end
     end
     return dlogZ
@@ -2273,13 +2274,13 @@ function logZCorrection10th(loopValue, dx, dy, g, messages, T, indmat, N)
     for origin_y = 1:dy, origin_x = 1:dx
         loop_l = loop10th(origin_x, origin_y, dx, dy)
         for loop in loop_l
-            dlogZ += loopValue(g, graph_to_edge_list(loop), messages, T, indmat, N)
+            dlogZ += loopValue(g, loop, messages, T, indmat, N)
         end
     end
 
     # two loops 4+6
     for origin_y1 = 1:dy, origin_x1 = 1:dx
-        for origin_y2 = origin_y1:dy, origin_x2 = origin_x1:dx
+        for origin_y2 = origin_y1:dy, origin_x1 = origin_x1:dx
             loop1_l = loop4th(origin_x1, origin_y1, dx, dy)
             loop2_l = loop6th(origin_x2, origin_y2, dx, dy)
             for loop1 in loop1_l, loop2 in loop2_l
@@ -2291,8 +2292,7 @@ function logZCorrection10th(loopValue, dx, dy, g, messages, T, indmat, N)
                     continue
                 end
 
-                dlogZ -= loopValue(g, graph_to_edge_list(loop1), messages, T, indmat, N) * 
-                         loopValue(g, graph_to_edge_list(loop2), messages, T, indmat, N) / 2
+                dlogZ -= loopValue(g, loop1, messages, T, indmat, N) * loopValue(g, loop2, messages, T, indmat, N) / 2
             end
         end
     end
