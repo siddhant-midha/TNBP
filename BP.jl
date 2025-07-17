@@ -36,7 +36,8 @@ function get_nbrs(adj_mat, v)
     return findall(x -> x == 1, row)
 end
 
-function get_messages(tensors,edges,links;η=0)
+
+function get_messages(tensors,edges,links;random_part=0)
     ## initialize the messages, 
     ## tensors: TN as a list 
     ## links: list of indices corresponding to edges in the tensor network
@@ -46,15 +47,16 @@ function get_messages(tensors,edges,links;η=0)
     for (e, edge) in enumerate(edges) 
         v1, v2 = edge 
         index = links[e]
-        messages[v1, v2] = delta(ComplexF64, index) + η * randomITensor(index)
-        messages[v2, v1] = delta(ComplexF64, index) + η * randomITensor(index)
+        messages[v1, v2] = delta(ComplexF64, index) + random_part * randomITensor(index)
+        messages[v2, v1] = delta(ComplexF64, index) + random_part * randomITensor(index)
         messages[v1, v2] = messages[v1, v2] / norm(messages[v1, v2])
         messages[v2, v1] = messages[v2, v1] / norm(messages[v2, v1])
     end 
     return messages
 end 
 
-function message_passing(tensors,messages,edges,links,adj_mat;α=1,η=0,max_iters=1000,diagnose=false)
+
+function message_passing(tensors,messages,edges,links,adj_mat;α=1,noise=0,max_iters=1000,diagnose=false,normalise=true)
     ## tensors: tensor network 
     ## messages: matrix of message tensors {μ[v1,v2]}
     ## links: list of indices corresponding to edges in the tensor network
@@ -67,8 +69,10 @@ function message_passing(tensors,messages,edges,links,adj_mat;α=1,η=0,max_iter
         iters += 1 
         δ = 0 
         for e in edges 
+            
             ## want to update the message from v1 → v2 
             v1, v2 = e 
+            @assert norm(messages[v1,v2]) > 1e-12 "messages decaying to zero!"
             update = tensors[v1]
             for nbr in get_nbrs(adj_mat, v1)
                 if nbr != v2 
@@ -76,19 +80,22 @@ function message_passing(tensors,messages,edges,links,adj_mat;α=1,η=0,max_iter
                 end
             end 
             # println(check_permutation_indices(messages[v1,v2],update))
-            new_message = update/norm(update)
+            new_message = normalise ? update/norm(update) : update 
             δ += norm(messages[v1,v2] - new_message)
             inde = inds(messages[v1,v2])[1]
             messages[v1,v2] = (1-α) * messages[v1,v2] + α * new_message 
-                                    + η * ITensor(randn(dim(inde)),inde)
-            messages[v1,v2] = messages[v1,v2] / norm(messages[v1,v2])
+                                    + noise * ITensor(randn(dim(inde)),inde)
+            messages[v1,v2] = normalise ? messages[v1,v2] / norm(messages[v1,v2]) : messages[v1,v2]
+
         end 
         
         # backward
         
         for e in edges
+            
             ## want to update the message from v1 → v2 
             v2, v1 = e 
+            @assert norm(messages[v1,v2]) > 1e-12 "messages decaying to zero!"
             update = tensors[v1]
             for nbr in get_nbrs(adj_mat, v1)
                 if nbr != v2 
@@ -96,12 +103,12 @@ function message_passing(tensors,messages,edges,links,adj_mat;α=1,η=0,max_iter
                 end
             end 
             # println(check_permutation_indices(messages[v1,v2],update))
-            new_message = update/norm(update)
+            new_message = normalise ? update/norm(update) : update 
             δ += norm(messages[v1,v2] - new_message)
             inde = inds(messages[v1,v2])[1]
             messages[v1,v2] = (1-α) * messages[v1,v2] + α * new_message 
-                                    + η * ITensor(randn(dim(inde)),inde)
-            messages[v1,v2] = messages[v1,v2] / norm(messages[v1,v2])
+                                    + noise * ITensor(randn(dim(inde)),inde)
+            messages[v1,v2] = normalise ? messages[v1,v2] / norm(messages[v1,v2]) : messages[v1,v2]
         end   
         
         Δ = δ  
@@ -113,6 +120,7 @@ function message_passing(tensors,messages,edges,links,adj_mat;α=1,η=0,max_iter
         return messages 
     end 
 end 
+
 
 function mean_free_partition_fn(these_vertices,tensors,messages,edges,links,adj_mat)
     ## computes the fixed point partition function at the vertices specified by these_vertices 
@@ -133,7 +141,8 @@ end
 
 function excited_edge(edge,messages,edges,links,adj_mat)
     ## gives the excited projector on the specified edge
-    v1,v2 = edge
+    v1, v2 = edge
+    v1, v2 = min(v1,v2), max(v1,v2)
     edge_index = findfirst(e -> e == edge, edges)
     index = links[edge_index]
     iden = ITensor(index,prime(index)) 
@@ -151,7 +160,7 @@ function loop_contribution(loop,messages,tensors,edges,links,adj_mat)
     vertices_done = Set()
     loop_contri = 1 
     N = length(tensors)
-    for edge in loop 
+    for edge in loop
         v1, v2 = edge ### v1 < v2 by convention 
         excitation = excited_edge(edge,messages,edges,links,adj_mat)
         loop_contri *= excitation
