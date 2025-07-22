@@ -4,7 +4,7 @@ test_loop_enumeration.jl
 Test suite for loop enumeration in Julia.
 """
 
-include("LoopEnumeration.jl")
+include("../functions/LoopEnumeration.jl")
 
 function test_10x10_loop_enumeration()
     println("Testing loop enumeration on 10x10 lattice")

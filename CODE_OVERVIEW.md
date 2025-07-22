@@ -12,12 +12,13 @@ This directory contains complete implementations for enumerating loops and clust
 - `is_valid_loop()` - validates degree ≥ 2 constraint
 - `create_periodic_square_lattice()` - generates lattice adjacency matrix
 
-### 2. `ClusterEnumeration.jl` 
-**Purpose:** Julia cluster enumeration (multisets of loops)
+### 2. `ClusterEnumeration.jl` ⭐
+**Purpose:** Julia cluster enumeration (multisets of loops) + Ursell functions
 **Main Functions:**
 - `ClusterEnumerator` struct - finds connected clusters of loops
 - `enumerate_connected_clusters()` - main cluster enumeration function
 - `build_interaction_graph()` - creates incompatibility graph
+- `ursell_function(cluster, all_loops)` - compute Ursell function φ(W) from polymer theory
 
 ### 3. `test_loop_enumeration.jl` ⭐
 **Purpose:** Comprehensive Julia test suite for loop enumeration

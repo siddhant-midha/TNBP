@@ -1,3 +1,5 @@
 .DS_Store
 python/
 *.pyc
+*.png
+*.tex

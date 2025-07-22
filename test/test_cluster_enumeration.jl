@@ -4,7 +4,7 @@ test_cluster_enumeration.jl
 Test suite for cluster enumeration in Julia.
 """
 
-include("ClusterEnumeration.jl")
+include("../functions/ClusterEnumeration.jl")
 
 function test_10x10_cluster_enumeration()
     println("Testing cluster enumeration on 10x10 lattice")

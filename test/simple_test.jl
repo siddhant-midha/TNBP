@@ -4,7 +4,7 @@ simple_test.jl
 Simple test to demonstrate the Julia loop enumeration works correctly.
 """
 
-include("LoopEnumeration.jl")
+include("../functions/LoopEnumeration.jl")
 
 function simple_test()
     println("Julia Loop and Cluster Enumeration - Simple Test")
