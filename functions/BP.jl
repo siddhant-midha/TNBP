@@ -154,34 +154,105 @@ function excited_edge(edge,messages,edges,links,adj_mat)
 end 
 
 
-function loop_contribution(loop,messages,tensors,edges,links,adj_mat)
-    ## gives the excited loop contribution to the partition function at the specified loop, and BP solution at all other edges
-    ## loop looks like [(v1,v2),(v2,v3) ...] ## MAKE SURE all edges in the loop are oriented such that v1 < v2
-    vertices_done = Set()
-    loop_contri = 1 
-    N = length(tensors)
+function loop_contribution(loop, messages, tensors, edges, links, adj_mat)
+    """
+    Compute the loop correction Z_l to the tensor network partition function.
+    
+    This implements the mathematical formula from polymer/cluster expansion:
+    Z_l = (∏[loop edges] P⊥_{edge}) * (∏[non-loop edges] μ_{edge}) * (∏[all vertices] T_v)
+    
+    where P⊥_{edge} = I - μ†_{v1→v2} * μ_{v2→v1} is the excited projector.
+    
+    INPUTS:
+    -------
+    loop : Vector{Tuple{Int,Int}}
+        List of edges forming the loop, e.g., [(1,2), (2,3), (3,1)]
+        CRITICAL: Each edge (v1,v2) must satisfy v1 < v2 (smaller vertex first)
+        
+    messages : Matrix{ITensor}
+        BP messages μ[i,j] from vertex i to vertex j
+        Size: n×n where n = number of vertices
+        
+    tensors : Vector{ITensor}
+        Original tensor network tensors T_v at each vertex
+        
+    edges : Vector{Tuple{Int,Int}}
+        Complete list of all edges in tensor network, with v1 < v2 convention
+        
+    links : Vector{Index}
+        ITensor indices corresponding to each edge
+        links[i] is the shared index for edge edges[i]
+        
+    adj_mat : Matrix{Int32}
+        Adjacency matrix of the tensor network graph
+        adj_mat[i,j] = 1 if vertices i,j are connected, 0 otherwise
+    
+    OUTPUT:
+    -------
+    ComplexF64 : The loop correction Z_l
+        Complex scalar representing the contribution of this loop to log(Z)
+        
+    ALGORITHM:
+    ----------
+    1. Replace loop edge messages with excited projectors P⊥ = I - μ†μ
+    2. For each vertex in loop:
+       - Apply appropriate index priming to match projector structure  
+       - Contract vertex tensor T_v with projectors
+       - Add BP messages from non-loop neighbors
+    3. Contract remaining vertices outside loop using standard BP
+    4. Return scalar result
+    
+    PHYSICS:
+    --------
+    This computes how the partition function changes when "exciting" a loop
+    - Loop edges use projectors orthogonal to BP messages
+    - Non-loop edges use standard BP messages  
+    - Result gives the loop correction term needed for tensor network loop expansion
+    """
+    # Initialize tracking variables
+    vertices_done = Set()  # Track which vertices have been processed
+    loop_contri = 1        # Accumulate the loop contribution tensor product
+    N = length(tensors)    # Total number of vertices in tensor network
+    
+    # Step 1: Process each edge in the loop
     for edge in loop
-        v1, v2 = edge ### v1 < v2 by convention 
-        excitation = excited_edge(edge,messages,edges,links,adj_mat)
+        v1, v2 = edge  # v1 < v2 by convention 
+        
+        # Replace BP message with excited projector P⊥ = I - μ†μ
+        excitation = excited_edge(edge, messages, edges, links, adj_mat)
         loop_contri *= excitation
+        
+        # Step 2a: Process vertex v1 (if not already done)
         if !(v1 in vertices_done)
             vertices_done = union(vertices_done, v1)
+            
+            # Find all vertices connected to v1 within the loop
             excited_neighbors = Set([other_vertex for edge in loop if v1 in edge for other_vertex in edge if other_vertex != v1])
-            edges_with_v1 = filter(t -> v1 in t, loop)  ## find excited edges with v1
-            edge_indices = [findfirst(isequal(t), edges) for t in edges_with_v1] ## find the corresponding indices in edges list 
-            larger_bools = [v1 == max(t[1], t[2]) for t in edges_with_v1] ## check if v1 is the larger vertex in the edge, so that we can prime it 
-            selected_links = links[edge_indices[larger_bools]] ## thus now we select the links to be primed 
-            contri = !isempty(selected_links) ? prime(tensors[v1], selected_links...) : tensors[v1] ## prime the selected links
+            
+            # Determine which indices need priming for proper tensor contraction
+            edges_with_v1 = filter(t -> v1 in t, loop)  # Find loop edges containing v1
+            edge_indices = [findfirst(isequal(t), edges) for t in edges_with_v1]  # Map to global edge list
+            larger_bools = [v1 == max(t[1], t[2]) for t in edges_with_v1]  # v1 is larger vertex → prime needed
+            selected_links = links[edge_indices[larger_bools]]  # Select indices to prime
+            
+            # Apply tensor T_v1 with appropriate index priming
+            contri = !isempty(selected_links) ? prime(tensors[v1], selected_links...) : tensors[v1]
             loop_contri *= contri
+            
+            # Add BP messages from neighbors outside the loop
             for w in get_nbrs(adj_mat, v1)
-                current_edge = (min(v1,w), max(v1,w))  
+                current_edge = (min(v1,w), max(v1,w))  # Standard edge ordering
                 edge_index = findfirst(e -> e == current_edge, edges)
                 current_link = links[edge_index]
+                
+                # Only add message if: (1) index exists in current contraction, (2) neighbor is outside loop
                 if current_link in inds(loop_contri) && !(w in excited_neighbors)
                     loop_contri *= messages[w,v1]  
                 end
             end
         end
+        
+        # Step 2b: Process vertex v2 (if not already done) - identical logic to v1
         if !(v2 in vertices_done)
             vertices_done = union(vertices_done, v2)
             excited_neighbors = Set([other_vertex for edge in loop if v2 in edge for other_vertex in edge if other_vertex != v2])
@@ -201,10 +272,36 @@ function loop_contribution(loop,messages,tensors,edges,links,adj_mat)
                     loop_contri *= messages[w,v2]  
                 end
             end
-    
         end
     end
-    return scalar(loop_contri) * mean_free_partition_fn(setdiff(Set(1:N),(vertices_done)),tensors,messages,edges,links,adj_mat)
+    
+    # Step 3: Contract to scalar and multiply by BP partition function on remaining vertices
+    # Loop contribution (scalar) × BP partition function on vertices outside the loop
+    return scalar(loop_contri) * mean_free_partition_fn(setdiff(Set(1:N), vertices_done), tensors, messages, edges, links, adj_mat)
 end
 
-end 
+function get_fixed_point_list(tensors,messages,edges,links,adj_mat)
+    ## get a list of the fixed point partition function at each vertex
+    Z_l = []
+    for index = 1:length(tensors)
+        nbrs = BP.get_nbrs(adj_mat, index)
+        Z_local = tensors[index] 
+        for nbr in nbrs
+            Z_local *= messages[nbr,index] 
+        end
+        @assert isempty(inds(Z_local))  "T[$index] must be a scalar"
+        push!(Z_l,scalar(Z_local))
+    end
+    return Z_l  
+end
+
+function normalize_tensor(tensors,Z_l)
+    ## normalize the tensor network by dividing by the BP fixed point
+    T_copy = copy(tensors)
+    for index = 1:length(tensors)
+        T_copy[index] /= Z_l[index]
+    end
+    return T_copy
+end
+
+end
