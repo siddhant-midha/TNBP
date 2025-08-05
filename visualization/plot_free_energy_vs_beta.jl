@@ -6,6 +6,7 @@ comparing cluster expansion corrections at different weights with exact Onsager 
 """
 
 include("../functions/cluster_expansion_2d_ising.jl")
+include("../functions/ClusterEnumeration.jl")
 using Plots
 
 function plot_free_energy_vs_beta(L::Int=6, beta_range=(0.1, 2.0), n_points::Int=20;

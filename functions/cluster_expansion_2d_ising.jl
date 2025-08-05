@@ -240,55 +240,54 @@ function compute_cluster_correction(T_normalized, messages, edges, links, adj_ma
     return real(total_correction)  # Take real part for final result
 end
 
+# Use the efficient enumeration from ClusterEnumeration.jl - just delegate to it
 function generate_all_clusters_of_weight(all_loops::Vector{Loop}, target_weight::Int,
                                        interaction_graph::Dict{Int, Vector{Int}})
-    """Generate all connected clusters of exactly the target weight."""
+    """Generate all connected clusters of exactly the target weight efficiently."""
     
+    println("🔄 Enumerating connected clusters for weight $target_weight...")
+    
+    # Find maximum site index to determine how many sites to check
+    max_site = 0
+    for loop in all_loops
+        for vertex in loop.vertices
+            max_site = max(max_site, vertex)
+        end
+    end
+    
+    # Use ClusterEnumeration.jl's efficient connected enumeration per site
     all_clusters = Cluster[]
     
-    # Generate all possible clusters (with multiplicities)
-    function enumerate_partitions(remaining_weight::Int, start_idx::Int, current_cluster::Vector{Int})
-        if remaining_weight == 0
-            if !isempty(current_cluster)
-                # Create cluster from current_cluster
-                multiplicities = Dict{Int, Int}()
-                for loop_id in current_cluster
-                    multiplicities[loop_id] = get(multiplicities, loop_id, 0) + 1
-                end
-                
-                cluster = Cluster(
-                    collect(keys(multiplicities)),
-                    multiplicities,
-                    target_weight,
-                    length(current_cluster)
-                )
-                
-                # Check if cluster is connected
-                if is_cluster_connected(cluster, interaction_graph)
+    for site in 1:max_site
+        if site % 20 == 1 || site <= 10
+            println("  Processing site $site/$max_site...")
+        end
+        
+        # Find loops supported on this site  
+        supported_loops = [loop for loop in all_loops if site in loop.vertices]
+        
+        if !isempty(supported_loops)
+            # Use existing efficient function from ClusterEnumeration.jl
+            site_clusters = enumerate_clusters_up_to_weight(
+                all_loops, supported_loops, site, target_weight, interaction_graph
+            )
+            
+            # Filter for connected clusters and exact weight
+            for cluster in site_clusters
+                if cluster.weight == target_weight && is_cluster_connected(cluster, interaction_graph)
                     push!(all_clusters, cluster)
                 end
-            end
-            return
-        end
-        
-        if remaining_weight < 0
-            return
-        end
-        
-        for loop_idx in start_idx:length(all_loops)
-            loop_weight = all_loops[loop_idx].weight
-            if loop_weight <= remaining_weight
-                push!(current_cluster, loop_idx)
-                enumerate_partitions(remaining_weight - loop_weight, loop_idx, current_cluster)
-                pop!(current_cluster)
             end
         end
     end
     
-    enumerate_partitions(target_weight, 1, Int[])
+    println("  Found $(length(all_clusters)) clusters from per-site enumeration")
     
     # Remove duplicates
-    return remove_cluster_redundancies(all_clusters)
+    unique_clusters = remove_cluster_redundancies(all_clusters)
+    println("  Reduced to $(length(unique_clusters)) unique connected clusters")
+    
+    return unique_clusters
 end
 
 # Main execution function

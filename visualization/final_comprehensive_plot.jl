@@ -55,7 +55,7 @@ function generate_final_plot()
             
             for weight in max_weights
                 try
-                    if weight <= 6
+                    if weight <= 100
                         correction = compute_limited_cluster_correction(T_norm, messages, edges, links, adj_mat, L, weight)
                         corrected_f = -(log(Z_bp) + correction) / (2 * L^2)
                         push!(critical_clusters[weight], real(corrected_f))
