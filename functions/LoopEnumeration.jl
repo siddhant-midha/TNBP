@@ -11,15 +11,26 @@ struct Loop
     weight::Int
 end
 
+# Canonical representation for loop deduplication
+function canonical_loop_representation(loop::Loop)
+    vertices = sort(loop.vertices)  # Keep ALL vertices
+    edges = sort([(min(u, v), max(u, v)) for (u, v) in loop.edges])  # Convert to tuples properly
+    return (vertices, edges, loop.weight)
+end
+
 struct LoopEnumerator
     adj_matrix::Matrix{Int}
     n_vertices::Int
     adj_list::Dict{Int, Vector{Int}}
+    L::Int  # Lattice size for locality optimization
+    coords::Dict{Int, Tuple{Int, Int}}  # site -> (i, j) coordinates
     
     function LoopEnumerator(adj_matrix::Matrix{Int})
         n = size(adj_matrix, 1)
+        L = Int(sqrt(n))  # Assume square lattice
         adj_list = build_adjacency_list(adj_matrix, n)
-        new(adj_matrix, n, adj_list)
+        coords = build_coordinate_map(L)
+        new(adj_matrix, n, adj_list, L, coords)
     end
 end
 
@@ -36,101 +47,315 @@ function build_adjacency_list(adj_matrix::Matrix{Int}, n::Int)
     return adj_list
 end
 
+function build_coordinate_map(L::Int)
+    """Build mapping from site index to (i,j) coordinates."""
+    coords = Dict{Int, Tuple{Int, Int}}()
+    for i in 1:L, j in 1:L
+        site = (i-1) * L + j
+        coords[site] = (i, j)
+    end
+    return coords
+end
+
+function lattice_distance(coord1::Tuple{Int,Int}, coord2::Tuple{Int,Int}, L::Int)
+    """Compute shortest distance on periodic square lattice."""
+    i1, j1 = coord1
+    i2, j2 = coord2
+    
+    di = min(abs(i2 - i1), L - abs(i2 - i1))
+    dj = min(abs(j2 - j1), L - abs(j2 - j1))
+    
+    return di + dj  # Manhattan distance with periodic boundaries
+end
+
 function find_loops_supported_on_vertex(enumerator::LoopEnumerator, vertex::Int, max_weight::Int)
+    """Find all loops supported on a vertex using DFS."""
     found_loops = Loop[]
-    find_loops_bfs!(enumerator, vertex, max_weight, found_loops)
+    
+    dfs_loop_enumeration!(enumerator, vertex, max_weight, found_loops)
     return found_loops
 end
 
-function find_loops_bfs!(enumerator::LoopEnumerator, start_vertex::Int, 
-                        max_weight::Int, found_loops::Vector{Loop})
-    neighbors = enumerator.adj_list[start_vertex]
+function find_loops_supported_on_vertex_optimized(enumerator::LoopEnumerator, vertex::Int, max_weight::Int, 
+                                                  global_seen::Set{Tuple{Vector{Int}, Vector{Tuple{Int,Int}}, Int}})
+    """Find loops supported on vertex with minimal but effective optimization."""
+    found_loops = Loop[]
     
-    for i in 1:length(neighbors)
-        for j in (i+1):length(neighbors)
-            n1, n2 = neighbors[i], neighbors[j]
-            initial_edges = [
-                (min(start_vertex, n1), max(start_vertex, n1)),
-                (min(start_vertex, n2), max(start_vertex, n2))
-            ]
-            initial_vertices = Set([start_vertex, n1, n2])
-            
-            if is_valid_loop(initial_vertices, initial_edges)
-                push!(found_loops, Loop(sort(collect(initial_vertices)), sort(initial_edges), length(initial_edges)))
-            end
-            
-            if length(initial_edges) < max_weight
-                expand_subgraph!(enumerator, initial_vertices, initial_edges, 
-                               max_weight, found_loops, start_vertex)
-            end
-        end
-    end
+    # Use the lightweight optimized version
+    dfs_loop_enumeration_optimized!(enumerator, vertex, max_weight, found_loops, global_seen)
+    return found_loops
 end
 
-function expand_subgraph!(enumerator::LoopEnumerator, vertices::Set{Int}, 
-                         edges::Vector{Tuple{Int,Int}}, max_weight::Int,
-                         found_loops::Vector{Loop}, target_vertex::Int)
-    if length(edges) >= max_weight
-        return
+function find_loops_supported_on_vertex_fast(enumerator::LoopEnumerator, vertex::Int, max_weight::Int)
+    """Ultra-minimal optimization - just canonical filtering during enumeration."""
+    found_loops = Loop[]
+    seen_loops = Set{Tuple{Vector{Int}, Vector{Tuple{Int,Int}}, Int}}()
+    
+    # Get all edges adjacent to vertex
+    center_edges = Tuple{Int,Int}[]
+    for neighbor in enumerator.adj_list[vertex]
+        edge = (min(vertex, neighbor), max(vertex, neighbor))
+        push!(center_edges, edge)
     end
     
-    candidate_edges = Tuple{Int,Int}[]
-    
-    # Edges between existing vertices
-    vertex_list = collect(vertices)
-    for i in 1:length(vertex_list)
-        for j in (i+1):length(vertex_list)
-            v1, v2 = vertex_list[i], vertex_list[j]
-            edge = (min(v1, v2), max(v1, v2))
-            if !(edge in edges) && v2 in enumerator.adj_list[v1]
-                push!(candidate_edges, edge)
+    function dfs_build_edge_set(current_edges::Vector{Tuple{Int,Int}}, edge_index::Int)
+        # Check if current edge set forms a valid loop
+        if length(current_edges) >= 2
+            vertices_set = Set{Int}()
+            for (u, v) in current_edges
+                push!(vertices_set, u)
+                push!(vertices_set, v)
             end
-        end
-    end
-    
-    # Edges to new vertices
-    for v in vertices
-        for neighbor in enumerator.adj_list[v]
-            if !(neighbor in vertices)
-                edge = (min(v, neighbor), max(v, neighbor))
-                push!(candidate_edges, edge)
-            end
-        end
-    end
-    
-    for edge in candidate_edges
-        new_edges = copy(edges)
-        push!(new_edges, edge)
-        new_vertices = copy(vertices)
-        union!(new_vertices, [edge[1], edge[2]])
-        
-        if !(target_vertex in new_vertices)
-            continue
-        end
-        
-        if is_valid_loop(new_vertices, new_edges)
-            loop_candidate = Loop(sort(collect(new_vertices)), sort(new_edges), length(new_edges))
             
-            is_duplicate = false
-            for existing_loop in found_loops
-                if (existing_loop.weight == loop_candidate.weight &&
-                    existing_loop.vertices == loop_candidate.vertices &&
-                    existing_loop.edges == loop_candidate.edges)
-                    is_duplicate = true
-                    break
+            if (vertex in vertices_set && is_valid_loop(vertices_set, current_edges))
+                # ONLY optimization: canonical filtering
+                if vertex == minimum(vertices_set)
+                    loop = Loop(sort(collect(vertices_set)), sort(current_edges), length(current_edges))
+                    canonical = canonical_loop_representation(loop)
+                    
+                    if !(canonical in seen_loops)
+                        push!(seen_loops, canonical)
+                        push!(found_loops, loop)
+                    end
+                end
+            end
+        end
+        
+        # Simple early stopping
+        if length(current_edges) >= max_weight
+            return
+        end
+        
+        # Continue search
+        current_vertices = Set{Int}()
+        for (u, v) in current_edges
+            push!(current_vertices, u)
+            push!(current_vertices, v)
+        end
+        
+        if isempty(current_vertices)
+            for edge in center_edges
+                dfs_build_edge_set([edge], 1)
+            end
+        else
+            candidate_edges = Set{Tuple{Int,Int}}()
+            for v in current_vertices
+                for neighbor in enumerator.adj_list[v]
+                    edge = (min(v, neighbor), max(v, neighbor))
+                    if !(edge in current_edges)
+                        push!(candidate_edges, edge)
+                    end
                 end
             end
             
-            if !is_duplicate
-                push!(found_loops, loop_candidate)
+            for edge in candidate_edges
+                new_edges = copy(current_edges)
+                push!(new_edges, edge)
+                dfs_build_edge_set(new_edges, edge_index + 1)
+            end
+        end
+    end
+    
+    dfs_build_edge_set(Tuple{Int,Int}[], 0)
+    return found_loops
+end
+
+function dfs_loop_enumeration!(enumerator::LoopEnumerator, center_vertex::Int, 
+                              max_weight::Int, found_loops::Vector{Loop})
+    """DFS-based loop enumeration: systematically explore all edge combinations."""
+    
+    seen_loops = Set{Tuple{Vector{Int}, Vector{Tuple{Int,Int}}, Int}}()
+    
+    # Get all edges adjacent to center_vertex to start exploration
+    center_edges = Tuple{Int,Int}[]
+    for neighbor in enumerator.adj_list[center_vertex]
+        edge = (min(center_vertex, neighbor), max(center_vertex, neighbor))
+        push!(center_edges, edge)
+    end
+    
+    # DFS to systematically build edge sets
+    function dfs_build_edge_set(current_edges::Vector{Tuple{Int,Int}}, edge_index::Int)
+        
+        # Check if current edge set forms a valid loop
+        if length(current_edges) >= 2
+            # Extract vertices from edges
+            vertices_set = Set{Int}()
+            for (u, v) in current_edges
+                push!(vertices_set, u)
+                push!(vertices_set, v)
+            end
+            
+            # Check if center_vertex is included and if it's a valid loop
+            if (center_vertex in vertices_set && 
+                is_valid_loop(vertices_set, current_edges))
+                
+                # Create loop and check for duplicates
+                loop = Loop(sort(collect(vertices_set)), sort(current_edges), length(current_edges))
+                canonical = canonical_loop_representation(loop)
+                
+                if !(canonical in seen_loops)
+                    push!(seen_loops, canonical)
+                    push!(found_loops, loop)
+                end
             end
         end
         
-        if length(new_edges) < max_weight
-            expand_subgraph!(enumerator, new_vertices, new_edges, max_weight, 
-                           found_loops, target_vertex)
+        # Stop if we've reached max weight
+        if length(current_edges) >= max_weight
+            return
+        end
+        
+        # Get all possible next edges from current vertices
+        current_vertices = Set{Int}()
+        for (u, v) in current_edges
+            push!(current_vertices, u)
+            push!(current_vertices, v)
+        end
+        
+        if isempty(current_vertices)
+            # Start with edges from center_vertex
+            for edge in center_edges
+                dfs_build_edge_set([edge], 1)
+            end
+        else
+            # Add edges from current vertices
+            candidate_edges = Set{Tuple{Int,Int}}()
+            for vertex in current_vertices
+                for neighbor in enumerator.adj_list[vertex]
+                    edge = (min(vertex, neighbor), max(vertex, neighbor))
+                    if !(edge in current_edges)  # Don't repeat edges
+                        push!(candidate_edges, edge)
+                    end
+                end
+            end
+            
+            # Try each candidate edge
+            for edge in candidate_edges
+                new_edges = copy(current_edges)
+                push!(new_edges, edge)
+                dfs_build_edge_set(new_edges, edge_index + 1)
+            end
         end
     end
+    
+    # Start DFS with empty edge set
+    dfs_build_edge_set(Tuple{Int,Int}[], 0)
+end
+
+function dfs_loop_enumeration_optimized!(enumerator::LoopEnumerator, center_vertex::Int, 
+                                        max_weight::Int, found_loops::Vector{Loop},
+                                        global_seen::Set{Tuple{Vector{Int}, Vector{Tuple{Int,Int}}, Int}})
+    """Lightweight optimized DFS - removes expensive operations causing slowdown."""
+    
+    seen_loops = Set{Tuple{Vector{Int}, Vector{Tuple{Int,Int}}, Int}}()
+    
+    # Get all edges adjacent to center_vertex to start exploration
+    center_edges = Tuple{Int,Int}[]
+    for neighbor in enumerator.adj_list[center_vertex]
+        edge = (min(center_vertex, neighbor), max(center_vertex, neighbor))
+        push!(center_edges, edge)
+    end
+    
+    # DFS to systematically build edge sets - similar to original but with key optimizations
+    function dfs_build_edge_set(current_edges::Vector{Tuple{Int,Int}}, edge_index::Int)
+        
+        # Check if current edge set forms a valid loop
+        if length(current_edges) >= 2
+            # Extract vertices from edges
+            vertices_set = Set{Int}()
+            for (u, v) in current_edges
+                push!(vertices_set, u)
+                push!(vertices_set, v)
+            end
+            
+            # Check if center_vertex is included and if it's a valid loop
+            if (center_vertex in vertices_set && 
+                is_valid_loop(vertices_set, current_edges))
+                
+                # OPTIMIZATION 1: Only proceed if center_vertex is minimum (reduces duplicates)
+                if center_vertex == minimum(vertices_set)
+                    # Create loop and check for duplicates
+                    loop = Loop(sort(collect(vertices_set)), sort(current_edges), length(current_edges))
+                    canonical = canonical_loop_representation(loop)
+                    
+                    # OPTIMIZATION 2: Skip expensive global_seen check for now - use local only
+                    if !(canonical in seen_loops)
+                        push!(seen_loops, canonical)
+                        push!(found_loops, loop)
+                    end
+                end
+            end
+        end
+        
+        # OPTIMIZATION 3: Simple weight-based early stopping
+        if length(current_edges) >= max_weight
+            return
+        end
+        
+        # Get all possible next edges from current vertices
+        current_vertices = Set{Int}()
+        for (u, v) in current_edges
+            push!(current_vertices, u)
+            push!(current_vertices, v)
+        end
+        
+        if isempty(current_vertices)
+            # Start with edges from center_vertex
+            for edge in center_edges
+                dfs_build_edge_set([edge], 1)
+            end
+        else
+            # Add edges from current vertices - REMOVED expensive distance checks
+            candidate_edges = Set{Tuple{Int,Int}}()
+            for vertex in current_vertices
+                for neighbor in enumerator.adj_list[vertex]
+                    edge = (min(vertex, neighbor), max(vertex, neighbor))
+                    if !(edge in current_edges)  # Don't repeat edges
+                        push!(candidate_edges, edge)
+                    end
+                end
+            end
+            
+            # Try each candidate edge
+            for edge in candidate_edges
+                new_edges = copy(current_edges)
+                push!(new_edges, edge)
+                dfs_build_edge_set(new_edges, edge_index + 1)
+            end
+        end
+    end
+    
+    # Start DFS with empty edge set
+    dfs_build_edge_set(Tuple{Int,Int}[], 0)
+end
+
+function could_be_valid_loop(vertices::Set{Int}, num_edges::Int)
+    """Quick check if vertex count and edge count could form a valid loop."""
+    n_vertices = length(vertices)
+    
+    # For a connected graph with all vertices having degree ≥ 2:
+    # minimum edges needed is n_vertices (for a cycle)
+    # maximum reasonable edges is roughly 2*n_vertices for dense loops
+    return num_edges >= n_vertices && num_edges <= 3*n_vertices
+end
+
+function is_reasonable_extension(current_vertices::Set{Int}, new_vertex::Int, enumerator::LoopEnumerator)
+    """Check if adding new_vertex creates a reasonable loop extension."""
+    
+    # For large loops, use spatial locality constraints
+    if length(current_vertices) > 4
+        # Get coordinates of current vertices and new vertex
+        center_coords = enumerator.coords[minimum(current_vertices)]
+        new_coords = enumerator.coords[new_vertex]
+        
+        # Reject vertices that are too far from the center
+        max_reasonable_distance = min(enumerator.L ÷ 2, 4)  # Adaptive distance limit
+        distance = lattice_distance(center_coords, new_coords, enumerator.L)
+        
+        return distance <= max_reasonable_distance
+    end
+    
+    return true  # Allow all extensions for small loops
 end
 
 function is_valid_loop(vertices::Set{Int}, edges::Vector{Tuple{Int,Int}})
@@ -214,4 +439,52 @@ function create_periodic_square_lattice(L::Int)
     return adj_matrix
 end
 
-# No module exports needed for include-style usage
+function find_all_loops_in_graph(enumerator::LoopEnumerator, max_weight::Int)
+    """Find all unique loops in the graph by enumerating from each vertex."""
+    all_loops = Loop[]
+    seen_loops = Set{Tuple{Vector{Int}, Vector{Tuple{Int,Int}}, Int}}()
+    
+    # Enumerate from each vertex and use canonical representation for deduplication
+    for vertex in 1:enumerator.n_vertices
+        vertex_loops = find_loops_supported_on_vertex(enumerator, vertex, max_weight)
+        
+        for loop in vertex_loops
+            canonical = canonical_loop_representation(loop)
+            
+            if !(canonical in seen_loops)
+                push!(seen_loops, canonical)
+                new_loop = Loop(sort(loop.vertices), sort(loop.edges), loop.weight)
+                push!(all_loops, new_loop)
+            end
+        end
+    end
+    
+    return all_loops
+end
+
+function find_all_loops_in_graph_optimized(enumerator::LoopEnumerator, max_weight::Int)
+    """Find all unique loops with speed optimizations while maintaining faithfulness."""
+    all_loops = Loop[]
+    seen_loops = Set{Tuple{Vector{Int}, Vector{Tuple{Int,Int}}, Int}}()
+    
+    # Optimization 1: Only enumerate from vertices that could be canonical representatives
+    # This reduces redundant work while maintaining complete coverage
+    for vertex in 1:enumerator.n_vertices
+        vertex_loops = find_loops_supported_on_vertex_optimized(enumerator, vertex, max_weight, seen_loops)
+        
+        for loop in vertex_loops
+            # Only keep loops where 'vertex' is the minimum vertex (canonical representative)
+            if vertex == minimum(loop.vertices)
+                canonical = canonical_loop_representation(loop)
+                
+                if !(canonical in seen_loops)
+                    push!(seen_loops, canonical)
+                    new_loop = Loop(sort(loop.vertices), sort(loop.edges), loop.weight)
+                    push!(all_loops, new_loop)
+                end
+            end
+        end
+    end
+    
+    return all_loops
+end

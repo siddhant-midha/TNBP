@@ -5,6 +5,9 @@ Julia implementation for enumerating connected clusters of loops.
 """
 
 include("LoopEnumeration.jl")
+using ProgressMeter
+using Serialization
+using Dates
 
 struct Cluster
     loop_ids::Vector{Int}
@@ -27,77 +30,97 @@ function enumerate_connected_clusters(enumerator::ClusterEnumerator, site::Int,
                                     max_weight::Int, max_loop_weight::Int = max_weight)
     """
     Enumerate all connected clusters of total weight <= max_weight supported on site.
+    Uses DFS starting from loops supported on the target site.
     """
     
     println("Step 1: Enumerating all loops up to weight $max_loop_weight...")
     
     # Find all possible loops in the graph
+    # all_loops = find_all_loops_in_graph(enumerator, max_loop_weight)
     all_loops = find_all_loops_in_graph(enumerator, max_loop_weight)
     println("Found $(length(all_loops)) total loops")
     
-    # Filter loops supported on target site
-    supported_loops = [loop for loop in all_loops if site in loop.vertices]
-    println("Found $(length(supported_loops)) loops supported on site $site")
-    
-    # Build interaction graph
+    # Build interaction graph once
     println("Step 2: Building interaction graph...")
-    interaction_graph = build_interaction_graph(all_loops)
+    interaction_graph = build_interaction_graph_optimized(all_loops)
     
-    # Enumerate clusters
-    println("Step 3: Enumerating clusters...")
-    all_clusters = enumerate_clusters_up_to_weight(all_loops, supported_loops, 
-                                                  site, max_weight, interaction_graph)
-    println("Found $(length(all_clusters)) total clusters before connectivity filtering")
+    # Find loops supported on target site (these are our starting points)
+    supported_loop_ids = Int[]
+    for (i, loop) in enumerate(all_loops)
+        if site in loop.vertices
+            push!(supported_loop_ids, i)
+        end
+    end
+    println("Found $(length(supported_loop_ids)) loops supported on site $site")
     
-    # Filter for connected clusters
-    println("Step 4: Filtering for connected clusters...")
-    connected_clusters = filter_connected_clusters(all_clusters, interaction_graph)
-    println("Found $(length(connected_clusters)) connected clusters")
+    if isempty(supported_loop_ids)
+        println("No loops found on site $site - returning empty cluster list")
+        return Cluster[]
+    end
+    
+    # DFS cluster enumeration starting from supported loops
+    println("Step 3: DFS cluster enumeration from supported loops...")
+    all_clusters = dfs_enumerate_clusters_from_supported(all_loops, supported_loop_ids, 
+                                                        max_weight, interaction_graph)
+    println("Found $(length(all_clusters)) connected clusters")
     
     # Remove redundancies
-    println("Step 5: Removing redundancies...")
-    unique_clusters = remove_cluster_redundancies(connected_clusters)
+    println("Step 4: Removing redundancies...")
+    unique_clusters = remove_cluster_redundancies(all_clusters)
     println("Found $(length(unique_clusters)) unique connected clusters")
     
     return unique_clusters
 end
 
 function find_all_loops_in_graph(enumerator::ClusterEnumerator, max_weight::Int)
+    """Find all loops by enumerating from each vertex but avoiding redundant work."""
     all_loops = Loop[]
-    seen_loops = Set{Tuple{Vector{Int}, Vector{Vector{Int}}, Int}}()
-    loop_id = 0
+    seen_loops = Set{Tuple{Vector{Int}, Vector{Tuple{Int,Int}}, Int}}()
     
-    for vertex in 1:enumerator.loop_enumerator.n_vertices
-        vertex_loops = find_loops_supported_on_vertex(enumerator.loop_enumerator, vertex, max_weight)
+    n_vertices = enumerator.loop_enumerator.n_vertices
+    println("  Enumerating loops from $n_vertices vertices...")
+    
+    # Progress bar for loop enumeration
+    println("  Starting loop enumeration...")
+    flush(stdout)
+    progress = Progress(n_vertices, dt=0.1, desc="Finding loops: ", color=:blue, barlen=50)
+    
+    # Only enumerate from the smallest vertex in each potential loop to avoid redundancy
+    for vertex in 1:n_vertices
+        vertex_loops = find_loops_supported_on_vertex_optimized(enumerator.loop_enumerator, vertex, max_weight, seen_loops)
+        # vertex_loops = find_loops_supported_on_vertex(enumerator.loop_enumerator, vertex, max_weight)
         
         for loop in vertex_loops
-            canonical = canonical_loop_representation(loop)
-            
-            if !(canonical in seen_loops)
-                push!(seen_loops, canonical)
-                # Create new loop with ID
-                new_loop = Loop(sort(loop.vertices), sort(loop.edges), loop.weight)
-                push!(all_loops, new_loop)
-                loop_id += 1
+            # Only keep loops where 'vertex' is the smallest vertex (canonical representative)
+            if vertex == minimum(loop.vertices)
+                canonical = canonical_loop_representation(loop)
+                
+                if !(canonical in seen_loops)
+                    push!(seen_loops, canonical)
+                    new_loop = Loop(sort(loop.vertices), sort(loop.edges), loop.weight)
+                    push!(all_loops, new_loop)
+                end
             end
         end
+        
+        next!(progress, showvalues = [("Vertex", "$vertex/$n_vertices"), ("Loops found", "$(length(all_loops))")])
     end
     
     return all_loops
 end
 
-function canonical_loop_representation(loop::Loop)
-    vertices = sort(loop.vertices)
-    edges = sort([sort([u, v]) for (u, v) in loop.edges])
-    return (vertices, edges, loop.weight)
-end
+# Import canonical_loop_representation from LoopEnumeration.jl (no need to redefine)
 
 function build_interaction_graph(loops::Vector{Loop})
     interaction_graph = Dict{Int, Vector{Int}}()
+    n_loops = length(loops)
     
-    for i in 1:length(loops)
+    println("  Building interaction graph for $n_loops loops...")
+    progress = Progress(n_loops, dt=1.0, desc="Building graph: ")
+    
+    for i in 1:n_loops
         interaction_graph[i] = Int[]
-        for j in 1:length(loops)
+        for j in 1:n_loops
             if i != j
                 vertices1 = Set(loops[i].vertices)
                 vertices2 = Set(loops[j].vertices)
@@ -107,43 +130,181 @@ function build_interaction_graph(loops::Vector{Loop})
                 end
             end
         end
+        next!(progress)
     end
     
     return interaction_graph
 end
 
-function enumerate_clusters_up_to_weight(all_loops::Vector{Loop}, supported_loops::Vector{Loop},
-                                       site::Int, max_weight::Int, 
-                                       interaction_graph::Dict{Int, Vector{Int}})
-    clusters = Cluster[]
+function build_interaction_graph_optimized(loops::Vector{Loop})
+    """Build interaction graph with optimizations for speed."""
+    interaction_graph = Dict{Int, Vector{Int}}()
+    n_loops = length(loops)
     
-    # Create mapping from loop to its ID by comparing canonical representations
-    supported_loop_ids = Int[]
-    for supported_loop in supported_loops
-        canonical_supported = canonical_loop_representation(supported_loop)
-        for (i, loop) in enumerate(all_loops)
-            canonical_loop = canonical_loop_representation(loop)
-            if canonical_supported == canonical_loop
-                push!(supported_loop_ids, i)
-                break
+    println("  Building optimized interaction graph for $n_loops loops...")
+    flush(stdout)
+    progress = Progress(n_loops, dt=0.1, desc="Building graph: ", color=:green, barlen=50)
+    
+    # Optimization 1: Pre-compute vertex sets once
+    vertex_sets = [Set(loop.vertices) for loop in loops]
+    
+    # Optimization 2: Build vertex-to-loops mapping for faster lookup
+    vertex_to_loops = Dict{Int, Vector{Int}}()
+    for (i, loop) in enumerate(loops)
+        for vertex in loop.vertices
+            if !haskey(vertex_to_loops, vertex)
+                vertex_to_loops[vertex] = Int[]
+            end
+            push!(vertex_to_loops[vertex], i)
+        end
+    end
+    
+    for i in 1:n_loops
+        interaction_graph[i] = Int[]
+        
+        # Optimization 3: Only check loops that share at least one vertex
+        candidate_loops = Set{Int}()
+        for vertex in loops[i].vertices
+            for j in get(vertex_to_loops, vertex, Int[])
+                if i != j
+                    push!(candidate_loops, j)
+                end
+            end
+        end
+        
+        # Now check intersection only with candidates
+        for j in candidate_loops
+            if !isempty(intersect(vertex_sets[i], vertex_sets[j]))
+                push!(interaction_graph[i], j)
+            end
+        end
+        
+        next!(progress)
+    end
+    
+    return interaction_graph
+end
+
+function dfs_enumerate_clusters_from_supported(all_loops::Vector{Loop}, supported_loop_ids::Vector{Int}, 
+                                               max_weight::Int, interaction_graph::Dict{Int, Vector{Int}})
+    """
+    Enumerate connected clusters using DFS starting from loops supported on target site.
+    Connectivity is guaranteed by growing through the interaction graph.
+    """
+    clusters = Cluster[]
+    seen_clusters = Set{Tuple}()
+    cluster_count = 0
+    
+    println("  Starting DFS cluster enumeration...")
+    println("  Supported loops: $(length(supported_loop_ids)), Max weight: $max_weight")
+    
+    # Progress tracking
+    last_report_time = time()
+    last_cluster_count = 0
+    
+    # DFS to grow clusters starting from each supported loop
+    function dfs_grow_cluster(current_cluster::Vector{Int}, current_weight::Int, 
+                             has_supported::Bool)
+        
+        # If we've found a valid cluster (has supported loop), record it
+        if has_supported && current_weight >= 1
+            # Create cluster with multiplicities
+            multiplicities = Dict{Int, Int}()
+            for loop_id in current_cluster
+                multiplicities[loop_id] = get(multiplicities, loop_id, 0) + 1
+            end
+            
+            cluster = Cluster(
+                collect(keys(multiplicities)),
+                multiplicities,
+                current_weight,
+                length(current_cluster)
+            )
+            
+            # Avoid duplicates using canonical signature
+            signature = canonical_cluster_signature(cluster)
+            if !(signature in seen_clusters)
+                push!(seen_clusters, signature)
+                push!(clusters, cluster)
+                cluster_count += 1
+                
+                # Progress reporting every 2 seconds
+                current_time = time()
+                if current_time - last_report_time >= 2.0
+                    new_clusters = cluster_count - last_cluster_count
+                    println("    Found $cluster_count clusters (+$new_clusters in last 2s)")
+                    last_report_time = current_time
+                    last_cluster_count = cluster_count
+                end
+            end
+        end
+        
+        # Stop if we've reached max weight
+        if current_weight >= max_weight
+            return
+        end
+        
+        # Find candidate loops to add (adjacent loops or multiplicities)
+        candidate_loops = Set{Int}()
+        
+        if isempty(current_cluster)
+            # Start with supported loops only
+            for loop_id in supported_loop_ids
+                if all_loops[loop_id].weight <= max_weight - current_weight
+                    push!(candidate_loops, loop_id)
+                end
+            end
+        else
+            # Add loops connected to current cluster via interaction graph
+            for loop_id in current_cluster
+                # Add connected loops (touching loops)
+                for neighbor_id in get(interaction_graph, loop_id, Int[])
+                    if all_loops[neighbor_id].weight <= max_weight - current_weight
+                        push!(candidate_loops, neighbor_id)
+                    end
+                end
+                # Allow multiplicity increases (same loop added again)
+                if all_loops[loop_id].weight <= max_weight - current_weight
+                    push!(candidate_loops, loop_id)
+                end
+            end
+        end
+        
+        # Try each candidate loop
+        for loop_id in candidate_loops
+            loop_weight = all_loops[loop_id].weight
+            new_weight = current_weight + loop_weight
+            
+            if new_weight <= max_weight
+                new_cluster = copy(current_cluster)
+                push!(new_cluster, loop_id)
+                new_has_supported = has_supported || (loop_id in supported_loop_ids)
+                
+                # Continue DFS (connectivity guaranteed by interaction graph)
+                dfs_grow_cluster(new_cluster, new_weight, new_has_supported)
             end
         end
     end
     
-    for total_weight in 1:max_weight
-        append!(clusters, generate_clusters_of_weight(all_loops, supported_loop_ids, total_weight))
-    end
+    # Start DFS with empty cluster
+    dfs_grow_cluster(Int[], 0, false)
     
+    println("  DFS enumeration completed: $cluster_count total clusters found")
     return clusters
 end
 
 function generate_clusters_of_weight(all_loops::Vector{Loop}, supported_loop_ids::Vector{Int}, 
                                    target_weight::Int)
+    """Generate clusters efficiently by building connected components incrementally."""
     clusters = Cluster[]
     
-    function generate_partitions(remaining_weight::Int, start_loop_idx::Int, current_cluster::Vector{Int})
+    # Build interaction graph once for efficiency
+    interaction_graph = build_interaction_graph(all_loops)
+    
+    function generate_connected_partitions(remaining_weight::Int, current_cluster::Vector{Int}, 
+                                         used_loop_ids::Set{Int}, must_include_supported::Bool)
         if remaining_weight == 0
-            if any(loop_id in supported_loop_ids for loop_id in current_cluster)
+            if must_include_supported && any(loop_id in supported_loop_ids for loop_id in current_cluster)
                 multiplicities = Dict{Int, Int}()
                 for loop_id in current_cluster
                     multiplicities[loop_id] = get(multiplicities, loop_id, 0) + 1
@@ -155,7 +316,11 @@ function generate_clusters_of_weight(all_loops::Vector{Loop}, supported_loop_ids
                     target_weight,
                     length(current_cluster)
                 )
-                push!(clusters, cluster)
+                
+                # Only add if connected (check connectivity during construction)
+                if is_cluster_connected(cluster, interaction_graph)
+                    push!(clusters, cluster)
+                end
             end
             return
         end
@@ -164,18 +329,53 @@ function generate_clusters_of_weight(all_loops::Vector{Loop}, supported_loop_ids
             return
         end
         
-        for loop_idx in start_loop_idx:length(all_loops)
+        # Find extendable loops (connected to current cluster or starting new)
+        candidate_loops = Int[]
+        
+        if isempty(current_cluster)
+            # Start with any loop
+            for loop_idx in 1:length(all_loops)
+                if all_loops[loop_idx].weight <= remaining_weight
+                    push!(candidate_loops, loop_idx)
+                end
+            end
+        else
+            # Only add loops connected to current cluster or same loops (multiplicities)
+            connected_loops = Set{Int}()
+            for loop_id in current_cluster
+                # Add connected loops
+                for connected_id in get(interaction_graph, loop_id, Int[])
+                    if !(connected_id in used_loop_ids) && all_loops[connected_id].weight <= remaining_weight
+                        push!(connected_loops, connected_id)
+                    end
+                end
+                # Allow multiplicity increases
+                if all_loops[loop_id].weight <= remaining_weight
+                    push!(connected_loops, loop_id)
+                end
+            end
+            candidate_loops = collect(connected_loops)
+        end
+        
+        # Try each candidate
+        for loop_idx in candidate_loops
             loop_weight = all_loops[loop_idx].weight
-            
             if loop_weight <= remaining_weight
-                push!(current_cluster, loop_idx)
-                generate_partitions(remaining_weight - loop_weight, loop_idx, current_cluster)
-                pop!(current_cluster)
+                new_cluster = copy(current_cluster)
+                push!(new_cluster, loop_idx)
+                new_used = copy(used_loop_ids)
+                if !(loop_idx in current_cluster)  # Only mark as used if it's truly new
+                    push!(new_used, loop_idx)
+                end
+                new_must_include = must_include_supported || (loop_idx in supported_loop_ids)
+                
+                generate_connected_partitions(remaining_weight - loop_weight, new_cluster, 
+                                            new_used, new_must_include)
             end
         end
     end
     
-    generate_partitions(target_weight, 1, Int[])
+    generate_connected_partitions(target_weight, Int[], Set{Int}(), false)
     return clusters
 end
 
@@ -507,6 +707,311 @@ function test_ursell_function()
     else
         println("⚠️  Not enough loops found for testing")
     end
+end
+
+# Cluster enumeration and saving/loading functions
+
+struct ClusterEnumerationData
+    """Data structure to save complete cluster enumeration results."""
+    clusters_by_site::Dict{Int, Vector{Cluster}}
+    all_loops::Vector{Loop}
+    adj_matrix::Matrix{Int}
+    max_weight::Int
+    lattice_size::Int
+    enumeration_time::Float64
+    timestamp::String
+    total_sites::Int
+end
+
+function enumerate_all_clusters_all_sites(enumerator::ClusterEnumerator, max_weight::Int, 
+                                         max_loop_weight::Int = max_weight; 
+                                         prefix::String = "")
+    """
+    Enumerate all connected clusters on all sites and save results.
+    
+    Args:
+        enumerator: ClusterEnumerator with the lattice graph
+        max_weight: Maximum cluster weight to enumerate
+        max_loop_weight: Maximum individual loop weight (defaults to max_weight)
+        prefix: Optional prefix for filename
+    
+    Returns:
+        ClusterEnumerationData: Complete enumeration results
+    """
+    
+    println("🚀 Starting complete cluster enumeration on all sites")
+    println("="^70)
+    
+    # Get lattice info
+    n_sites = enumerator.loop_enumerator.n_vertices
+    L = enumerator.loop_enumerator.L
+    
+    println("Parameters:")
+    println("  Lattice size: $(L)x$(L) ($n_sites sites)")
+    println("  Max cluster weight: $max_weight")
+    println("  Max loop weight: $max_loop_weight")
+    println("  Will save to: saved_clusters/")
+    
+    start_time = time()
+    
+    # Find all loops once (shared across all sites)
+    println("\n📊 Step 1: Enumerating all loops...")
+    println("   This may take a while for larger lattices...")
+    flush(stdout)
+    all_loops = find_all_loops_in_graph(enumerator, max_loop_weight)
+    println("Found $(length(all_loops)) total loops")
+    
+    # Build interaction graph once 
+    println("\n🔗 Step 2: Building interaction graph...")
+    flush(stdout)
+    interaction_graph = build_interaction_graph_optimized(all_loops)
+    
+    # Enumerate clusters for each site
+    println("\n🌐 Step 3: Enumerating clusters for each site...")
+    flush(stdout)
+    clusters_by_site = Dict{Int, Vector{Cluster}}()
+    
+    println("  Processing $(n_sites) sites...")
+    flush(stdout)
+    progress = Progress(n_sites, dt=0.1, desc="Sites processed: ", color=:cyan, barlen=50)
+    
+    for site in 1:n_sites
+        # Find loops supported on this site
+        supported_loop_ids = Int[]
+        for (i, loop) in enumerate(all_loops)
+            if site in loop.vertices
+                push!(supported_loop_ids, i)
+            end
+        end
+        
+        if !isempty(supported_loop_ids)
+            # Enumerate clusters for this site
+            site_clusters = dfs_enumerate_clusters_from_supported(all_loops, supported_loop_ids, 
+                                                                max_weight, interaction_graph)
+            # Remove redundancies
+            unique_clusters = remove_cluster_redundancies(site_clusters)
+            clusters_by_site[site] = unique_clusters
+        else
+            clusters_by_site[site] = Cluster[]
+        end
+        
+        next!(progress)
+    end
+    
+    end_time = time()
+    enumeration_time = end_time - start_time
+    
+    # Create data structure
+    data = ClusterEnumerationData(
+        clusters_by_site,
+        all_loops,
+        enumerator.adj_matrix,
+        max_weight,
+        L,
+        enumeration_time,
+        string(now()),
+        n_sites
+    )
+    
+    # Save results
+    save_cluster_enumeration(data, prefix)
+    
+    # Print summary
+    total_clusters = sum(length(clusters) for clusters in values(clusters_by_site))
+    println("\n✅ ENUMERATION COMPLETE!")
+    println("="^50)
+    println("Total enumeration time: $(round(enumeration_time, digits=2)) seconds")
+    println("Total clusters found: $total_clusters")
+    println("Average clusters per site: $(round(total_clusters / n_sites, digits=2))")
+    
+    # Show distribution
+    cluster_counts = [length(clusters) for clusters in values(clusters_by_site)]
+    println("Cluster count distribution:")
+    println("  Min: $(minimum(cluster_counts))")
+    println("  Max: $(maximum(cluster_counts))")
+    println("  Mean: $(round(sum(cluster_counts) / length(cluster_counts), digits=2))")
+    
+    return data
+end
+
+function save_cluster_enumeration(data::ClusterEnumerationData, prefix::String = "")
+    """Save cluster enumeration data to file."""
+    
+    # Create directory if it doesn't exist
+    save_dir = "saved_clusters"
+    if !isdir(save_dir)
+        mkpath(save_dir)
+        println("📁 Created directory: $save_dir")
+    end
+    
+    # Generate filename
+    timestamp = replace(data.timestamp, ":" => "-", "." => "-")
+    base_name = "clusters_L$(data.lattice_size)_w$(data.max_weight)_$(timestamp)"
+    if !isempty(prefix)
+        base_name = "$(prefix)_$(base_name)"
+    end
+    
+    filepath = joinpath(save_dir, "$(base_name).jld2")
+    
+    # Save using Julia's serialization
+    println("💾 Saving enumeration data to: $(filepath)")
+    
+    # Create summary for quick inspection
+    summary = Dict(
+        "lattice_size" => data.lattice_size,
+        "total_sites" => data.total_sites,
+        "max_weight" => data.max_weight,
+        "total_loops" => length(data.all_loops),
+        "total_clusters" => sum(length(clusters) for clusters in values(data.clusters_by_site)),
+        "enumeration_time_seconds" => data.enumeration_time,
+        "timestamp" => data.timestamp
+    )
+    
+    # Save both data and summary
+    save_data = Dict(
+        "data" => data,
+        "summary" => summary
+    )
+    
+    open(filepath, "w") do io
+        serialize(io, save_data)
+    end
+    
+    println("✅ Saved successfully!")
+    println("   Summary: $summary")
+    
+    return filepath
+end
+
+function load_cluster_enumeration(filepath::String)
+    """
+    Load saved cluster enumeration data.
+    
+    Args:
+        filepath: Path to saved .jld2 file
+        
+    Returns:
+        ClusterEnumerationData: Loaded enumeration results
+    """
+    
+    if !isfile(filepath)
+        error("File not found: $filepath")
+    end
+    
+    println("📖 Loading cluster enumeration from: $filepath")
+    
+    loaded_data = open(filepath, "r") do io
+        deserialize(io)
+    end
+    
+    data = loaded_data["data"]
+    summary = loaded_data["summary"]
+    
+    println("✅ Loaded successfully!")
+    println("   Summary: $summary")
+    
+    return data
+end
+
+function list_saved_cluster_files(save_dir::String = "saved_clusters")
+    """List all saved cluster enumeration files with their summaries."""
+    
+    if !isdir(save_dir)
+        println("Directory does not exist: $save_dir")
+        return
+    end
+    
+    files = filter(f -> endswith(f, ".jld2"), readdir(save_dir))
+    
+    if isempty(files)
+        println("No saved cluster files found in: $save_dir")
+        return
+    end
+    
+    println("📋 Saved cluster enumeration files:")
+    println("="^60)
+    
+    for file in files
+        filepath = joinpath(save_dir, file)
+        try
+            loaded_data = open(filepath, "r") do io
+                deserialize(io)
+            end
+            summary = loaded_data["summary"]
+            
+            println("📄 $file")
+            println("   Lattice: $(summary["lattice_size"])x$(summary["lattice_size"]) ($(summary["total_sites"]) sites)")
+            println("   Max weight: $(summary["max_weight"])")
+            println("   Clusters: $(summary["total_clusters"]), Loops: $(summary["total_loops"])")
+            println("   Time: $(round(summary["enumeration_time_seconds"], digits=2))s")
+            println("   Created: $(summary["timestamp"])")
+            println()
+        catch e
+            println("❌ Error reading $file: $e")
+        end
+    end
+end
+
+function get_clusters_for_site(data::ClusterEnumerationData, site::Int)
+    """Get all clusters supported on a specific site."""
+    return get(data.clusters_by_site, site, Cluster[])
+end
+
+function get_clusters_by_weight(data::ClusterEnumerationData, weight::Int)
+    """Get all clusters of a specific weight across all sites."""
+    result = Cluster[]
+    
+    for clusters in values(data.clusters_by_site)
+        for cluster in clusters
+            if cluster.weight == weight
+                push!(result, cluster)
+            end
+        end
+    end
+    
+    return result
+end
+
+function analyze_saved_enumeration(data::ClusterEnumerationData)
+    """Analyze and display statistics about saved enumeration data."""
+    
+    println("📊 CLUSTER ENUMERATION ANALYSIS")
+    println("="^50)
+    
+    # Basic info
+    println("Lattice: $(data.lattice_size)x$(data.lattice_size) ($(data.total_sites) sites)")
+    println("Max weight: $(data.max_weight)")
+    println("Total loops: $(length(data.all_loops))")
+    println("Enumeration time: $(round(data.enumeration_time, digits=2)) seconds")
+    println("Created: $(data.timestamp)")
+    
+    # Cluster statistics
+    total_clusters = sum(length(clusters) for clusters in values(data.clusters_by_site))
+    println("\nCluster Statistics:")
+    println("  Total clusters: $total_clusters")
+    
+    # Distribution by weight
+    by_weight = Dict{Int, Int}()
+    for clusters in values(data.clusters_by_site)
+        for cluster in clusters
+            by_weight[cluster.weight] = get(by_weight, cluster.weight, 0) + 1
+        end
+    end
+    
+    println("  Distribution by weight:")
+    for weight in sort(collect(keys(by_weight)))
+        count = by_weight[weight]
+        println("    Weight $weight: $count clusters")
+    end
+    
+    # Distribution by site
+    cluster_counts = [length(clusters) for clusters in values(data.clusters_by_site)]
+    println("  Distribution by site:")
+    println("    Min: $(minimum(cluster_counts)) clusters")
+    println("    Max: $(maximum(cluster_counts)) clusters") 
+    println("    Mean: $(round(sum(cluster_counts) / length(cluster_counts), digits=2)) clusters")
+    
+    return nothing
 end
 
 # No module exports needed for include-style usage
