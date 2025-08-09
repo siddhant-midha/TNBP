@@ -209,9 +209,11 @@ function decode(pcmat, p, numsamples, L; pbias = 0.1, max_loop_order = 8)
     ## should work for arbitrary loop orders
     m, n = size(pcmat)
     tannerloopslist = [find_tanner_loops(pcmat, d; max_length=max_loop_order) for d in 1:n]
-    # Track errors within this batch
-    logical_errors = zeros(numsamples)
-    failure_rate = zeros(numsamples)
+    # Track errors within this batch for both methods
+    logical_errors_loops = zeros(numsamples)
+    failure_rate_loops = zeros(numsamples)
+    logical_errors_no_loops = zeros(numsamples)
+    failure_rate_no_loops = zeros(numsamples)
     
     # Create progress bar for samples
     sample_prog = Progress(numsamples, desc="Samples: ", showspeed=true)
@@ -223,63 +225,82 @@ function decode(pcmat, p, numsamples, L; pbias = 0.1, max_loop_order = 8)
         syndrome = pcmat * errors_true .% 2
         # Decode
         data_tensors, syn_tensors, data_indices = get_network(pcmat, syndrome, pbias)
-        errors = Int.(-1 .* ones(n))
-        tensors = vcat(get_marginal_data_tensors(data_tensors, data_indices, errors), syn_tensors)
+        errors_loops = Int.(-1 .* ones(n))
+        errors_no_loops = Int.(-1 .* ones(n))
+        tensors = vcat(get_marginal_data_tensors(data_tensors, data_indices, errors_loops), syn_tensors)
         adj_mat, edges, links = BP.get_adj_mat(tensors)
         messages = BP.get_messages(tensors,edges,links) 
         messages = BP.message_passing(tensors,messages,edges,links,adj_mat;α=0.95, max_iters=500,diagnose=false,normalise=true)
-        priors = [ITensor([0.,0.], data_indices[i]) for i in 1:n]
+        
+        # Two sets of priors: with and without loop corrections
+        priors_loops = [ITensor([0.,0.], data_indices[i]) for i in 1:n]
+        priors_no_loops = [ITensor([0.,0.], data_indices[i]) for i in 1:n]
 
         for d = 1:n
-            ## vacuum contribution 
+            ## vacuum contribution (same for both methods)
             probs = get_marginal(vcat(data_tensors,syn_tensors),adj_mat,messages,d)
-            priors[d] += probs
-            ix = inds(priors[d])[1]
-            probs = [real((priors[d])[ix=>n]) for n in 1:dim(ix)]
-            probs ./= sum(probs)
-            error_i = sample_bit(probs[1])
-            errors[d] = error_i
+            priors_loops[d] += probs
+            priors_no_loops[d] += probs
+            
+            # Decode with loop corrections
+            ix = inds(priors_loops[d])[1]
+            probs_loops = [real((priors_loops[d])[ix=>n]) for n in 1:dim(ix)]
+            probs_loops ./= sum(probs_loops)
+            error_i_loops = sample_bit(probs_loops[1])
+            errors_loops[d] = error_i_loops
+            
+            # Decode without loop corrections (use same base probabilities)
+            ix_no = inds(priors_no_loops[d])[1]
+            probs_no_loops = [real((priors_no_loops[d])[ix_no=>n]) for n in 1:dim(ix_no)]
+            probs_no_loops ./= sum(probs_no_loops)
+            error_i_no_loops = sample_bit(probs_no_loops[1])
+            errors_no_loops[d] = error_i_no_loops
 
-            if errors[d] != errors_true[d]
-                # no point in going forward
+            # Early termination check for loop method
+            if errors_loops[d] != errors_true[d]
+                # no point in going forward for loop method
                 break
             end 
 
+            # Loop corrections (only for the loop method)
             tannerloops = tannerloopslist[d]
             loop_list = [tannerloop.edges for tannerloop in tannerloops] 
             data_bits_involved_list = [tannerloop.data_bits for tannerloop in tannerloops]
             check_bits_involved_list = [tannerloop.check_bits for tannerloop in tannerloops]
             
             for (i, loop) in enumerate(loop_list)
-                # print(loop)
                 data_bits_involved = data_bits_involved_list[i] 
                 check_bits_involved = check_bits_involved_list[i] 
                 data_bits_involved_other = collect(setdiff(data_bits_involved, [d]) )
-                # println(loop, " ",[e in edges for e in loop], " ", data_bits_involved, " ", check_bits_involved)
-                for data_bit in data_bits_involved_other ## exclude data_bit, keep that leg open, the sampled leg is already accounted to for by "erorrs" list
-                    if true #all([errors[bit] != -1 for bit in collect(setdiff(data_bits_involved, [data_bit]))])
-                        mtensors = vcat(get_marginal_data_tensors(data_tensors, data_indices, errors; exclude=[data_bit]), syn_tensors)
+                
+                for data_bit in data_bits_involved_other
+                    if true #all([errors_loops[bit] != -1 for bit in collect(setdiff(data_bits_involved, [data_bit]))])
+                        mtensors = vcat(get_marginal_data_tensors(data_tensors, data_indices, errors_loops; exclude=[data_bit]), syn_tensors)
                         ## account for normalization from other nodes in the loop 
                         normlz = (prod([get_marginal(mtensors,adj_mat,messages,other_data_bit) for other_data_bit in collect(setdiff(data_bits_involved, [data_bit]) )]))
                         normlz *= (prod([get_marginal(mtensors,adj_mat,messages,n+check_bit) for check_bit in check_bits_involved]))
-                        ## update the prior of the data bit in the loop
-                        # println(loop_contribution(loop, messages, mtensors, edges, links, adj_mat))
-                        priors[data_bit] += loop_contribution(loop, messages, mtensors, edges, links, adj_mat) / normlz
+                        ## update the prior of the data bit in the loop (only for loop method)
+                        priors_loops[data_bit] += loop_contribution(loop, messages, mtensors, edges, links, adj_mat) / normlz
                     end 
                 end 
-                
             end 
-            
         end
-        (syndrome_zero, homology_trivial) = check_decode_edges(errors, errors_true, L)
-        logical_errors[samp] = (syndrome_zero && homology_trivial) ? 0.0 : 1.0
-        failure_rate[samp] = syndrome_zero ? 0.0 : 1.0
-        # logical_errors[samp] = (sum(errors .!= errors_true) > 0)
+        
+        # Check results for both methods
+        (syndrome_zero_loops, homology_trivial_loops) = check_decode_edges(errors_loops, errors_true, L)
+        logical_errors_loops[samp] = (syndrome_zero_loops && homology_trivial_loops) ? 0.0 : 1.0
+        failure_rate_loops[samp] = syndrome_zero_loops ? 0.0 : 1.0
+        
+        (syndrome_zero_no_loops, homology_trivial_no_loops) = check_decode_edges(errors_no_loops, errors_true, L)
+        logical_errors_no_loops[samp] = (syndrome_zero_no_loops && homology_trivial_no_loops) ? 0.0 : 1.0
+        failure_rate_no_loops[samp] = syndrome_zero_no_loops ? 0.0 : 1.0
         
         # Update sample progress
         next!(sample_prog)
     end
-    return mean(logical_errors), std(logical_errors), mean(failure_rate), std(failure_rate)
+    
+    return (mean(logical_errors_loops), std(logical_errors_loops), mean(failure_rate_loops), std(failure_rate_loops),
+            mean(logical_errors_no_loops), std(logical_errors_no_loops), mean(failure_rate_no_loops), std(failure_rate_no_loops))
 end
 
 # L = 5 
@@ -291,8 +312,8 @@ end
 
 # Parameters
 Ls = [3,5]
-ps = 0:0.001:0.005
-numsamples = 1000
+ps = 0.002:0.001:0.01
+numsamples = 10000
 max_loop_order = 4
 
 
@@ -324,36 +345,68 @@ for (i, L) in enumerate(Ls)
     println("Processing L = $L")
     pcmat = toric_code_X_parity_matrix(L)
 
-    logical_means = Float64[]
-    logical_stds = Float64[]
-    failure_means = Float64[]
-    failure_stds = Float64[]
+    # With loop corrections
+    logical_means_loops = Float64[]
+    logical_stds_loops = Float64[]
+    failure_means_loops = Float64[]
+    failure_stds_loops = Float64[]
+    
+    # Without loop corrections
+    logical_means_no_loops = Float64[]
+    logical_stds_no_loops = Float64[]
+    failure_means_no_loops = Float64[]
+    failure_stds_no_loops = Float64[]
 
     # Create progress bar for this L value
     prog = Progress(length(ps), desc="L=$L: ")
     
     for (j, p) in enumerate(ps)
-        μ_logical, σ_logical, μ_failure, σ_failure = decode(pcmat, p, numsamples, L; pbias=p, max_loop_order=max_loop_order)
-        push!(logical_means, μ_logical)
-        push!(logical_stds, σ_logical)
-        push!(failure_means, μ_failure)
-        push!(failure_stds, σ_failure)
+        # Decode both methods simultaneously
+        μ_logical_loops, σ_logical_loops, μ_failure_loops, σ_failure_loops,
+        μ_logical_no_loops, σ_logical_no_loops, μ_failure_no_loops, σ_failure_no_loops = decode(pcmat, p, numsamples, L; pbias=p, max_loop_order=max_loop_order)
+        
+        # Store results for loop method
+        push!(logical_means_loops, μ_logical_loops)
+        push!(logical_stds_loops, σ_logical_loops)
+        push!(failure_means_loops, μ_failure_loops)
+        push!(failure_stds_loops, σ_failure_loops)
+        
+        # Store results for no-loop method
+        push!(logical_means_no_loops, μ_logical_no_loops)
+        push!(logical_stds_no_loops, σ_logical_no_loops)
+        push!(failure_means_no_loops, μ_failure_no_loops)
+        push!(failure_stds_no_loops, σ_failure_no_loops)
         
         # Update progress bar
-        next!(prog, showvalues = [(:p, p), (:logical_error_rate, μ_logical), (:syndrome_failure_rate, μ_failure)])
+        next!(prog, showvalues = [(:p, p), (:logical_loops, μ_logical_loops), (:logical_no_loops, μ_logical_no_loops),
+                                  (:syndrome_loops, μ_failure_loops), (:syndrome_no_loops, μ_failure_no_loops)])
     end
 
     # Plot logical error rates
-    plot!(plt_logical, ps, logical_means;
-          label="L = $L",
+    plot!(plt_logical, ps, logical_means_loops;
+          label="L = $L (with loops)",
           marker=:circle,
-          color=colors[i])
+          color=colors[i],
+          linestyle=:solid)
+          
+    plot!(plt_logical, ps, logical_means_no_loops;
+          label="L = $L (no loops)",
+          marker=:square,
+          color=colors[i],
+          linestyle=:dash)
           
     # Plot failure rates  
-    plot!(plt_failure, ps, failure_means;
-          label="L = $L",
+    plot!(plt_failure, ps, failure_means_loops;
+          label="L = $L (with loops)",
           marker=:circle,
-          color=colors[i])
+          color=colors[i],
+          linestyle=:solid)
+          
+    plot!(plt_failure, ps, failure_means_no_loops;
+          label="L = $L (no loops)",
+          marker=:square,
+          color=colors[i],
+          linestyle=:dash)
 end
 
 # Create combined plot
