@@ -1,7 +1,8 @@
 push!(LOAD_PATH, "functions/")
 using BP
-using Random, Plots, SparseArrays, ITensors, Statistics, ProgressMeter, Colors
+using Random, Plots, SparseArrays, ITensors, Statistics, ProgressMeter, Colors, LinearAlgebra
 include("ldpc_tanner_loops.jl")
+include("functions/tc_decode.jl")
 
 
 function parity_tensor(index_arr, parity)
@@ -203,13 +204,17 @@ function loop_contribution(loop, messages, tensors, edges, links, adj_mat)
     return (loop_contri) #* mean_free_partition_fn(setdiff(Set(1:N), vertices_done), tensors, messages, edges, links, adj_mat)
 end
 
-function decode(pcmat, p, numsamples; pbias = 0.1, max_loop_order = 8)
+function decode(pcmat, p, numsamples, L; pbias = 0.1, max_loop_order = 8)
     ## keeps a list of priors on all bits, and adds to the prior as and when a loop is encountered
     ## should work for arbitrary loop orders
     m, n = size(pcmat)
     tannerloopslist = [find_tanner_loops(pcmat, d; max_length=max_loop_order) for d in 1:n]
     # Track errors within this batch
     logical_errors = zeros(numsamples)
+    failure_rate = zeros(numsamples)
+    
+    # Create progress bar for samples
+    sample_prog = Progress(numsamples, desc="Samples: ", showspeed=true)
     
     for samp in 1:numsamples
         # Sample errors iid with probability p
@@ -266,10 +271,15 @@ function decode(pcmat, p, numsamples; pbias = 0.1, max_loop_order = 8)
             end 
             
         end
+        (syndrome_zero, homology_trivial) = check_decode_edges(errors, errors_true, L)
+        logical_errors[samp] = (syndrome_zero && homology_trivial) ? 0.0 : 1.0
+        failure_rate[samp] = syndrome_zero ? 0.0 : 1.0
+        # logical_errors[samp] = (sum(errors .!= errors_true) > 0)
         
-        logical_errors[samp] = (sum(errors .!= errors_true) > 0)
+        # Update sample progress
+        next!(sample_prog)
     end
-    return mean(logical_errors), std(logical_errors)
+    return mean(logical_errors), std(logical_errors), mean(failure_rate), std(failure_rate)
 end
 
 # L = 5 
@@ -281,8 +291,8 @@ end
 
 # Parameters
 Ls = [3,5]
-ps = 0:0.0025:0.01
-numsamples = 2000
+ps = 0:0.001:0.005
+numsamples = 1000
 max_loop_order = 4
 
 
@@ -298,32 +308,63 @@ end
 # Generate color gradient
 colors = red_gradient(length(Ls))
 
-# Create a plot
-plt = plot(title="Toric Code Logical Error Rate vs Physical Error Rate",
-           xlabel="Physical error rate p",
-           ylabel="Logical error rate",
-           legend=:topright)
+# Create plots for both metrics
+plt_logical = plot(title="Toric Code Logical Error Rate vs Physical Error Rate",
+                  xlabel="Physical error rate p",
+                  ylabel="Logical error rate",
+                  legend=:topright)
+
+plt_failure = plot(title="Toric Code Syndrome Failure Rate vs Physical Error Rate",
+                  xlabel="Physical error rate p", 
+                  ylabel="Syndrome failure rate",
+                  legend=:topright)
 
 # Loop over L values
 for (i, L) in enumerate(Ls)
-    println("at L = ", L)
+    println("Processing L = $L")
     pcmat = toric_code_X_parity_matrix(L)
 
-    means = Float64[]
-    stds = Float64[]
+    logical_means = Float64[]
+    logical_stds = Float64[]
+    failure_means = Float64[]
+    failure_stds = Float64[]
 
-    for p in ps
-        μ, σ = decode(pcmat, p, numsamples; pbias=p, max_loop_order=max_loop_order)
-        push!(means, μ)
-        push!(stds, σ)
+    # Create progress bar for this L value
+    prog = Progress(length(ps), desc="L=$L: ")
+    
+    for (j, p) in enumerate(ps)
+        μ_logical, σ_logical, μ_failure, σ_failure = decode(pcmat, p, numsamples, L; pbias=p, max_loop_order=max_loop_order)
+        push!(logical_means, μ_logical)
+        push!(logical_stds, σ_logical)
+        push!(failure_means, μ_failure)
+        push!(failure_stds, σ_failure)
+        
+        # Update progress bar
+        next!(prog, showvalues = [(:p, p), (:logical_error_rate, μ_logical), (:syndrome_failure_rate, μ_failure)])
     end
 
-    plot!(plt, ps, means;#yerror=stds,
+    # Plot logical error rates
+    plot!(plt_logical, ps, logical_means;
+          label="L = $L",
+          marker=:circle,
+          color=colors[i])
+          
+    # Plot failure rates  
+    plot!(plt_failure, ps, failure_means;
           label="L = $L",
           marker=:circle,
           color=colors[i])
 end
 
-display(plt)
+# Create combined plot
+plt_combined = plot(plt_logical, plt_failure, layout=(2,1), size=(800, 800))
+
+# Save plots to visualization directory
+mkpath("visualization")
+savefig(plt_logical, "visualization/toric_code_logical_errors.png")
+savefig(plt_failure, "visualization/toric_code_syndrome_failures.png") 
+savefig(plt_combined, "visualization/toric_code_combined_metrics.png")
+
+println("Plots saved to visualization/ directory")
 println("Press Enter to exit...")
 readline()  # waits for user input
