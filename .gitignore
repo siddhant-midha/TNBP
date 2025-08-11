@@ -4,3 +4,7 @@ python/
 *.png
 *.tex
 *.jld2
+*.csv
+*.out
+core*
+*.npz
