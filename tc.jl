@@ -1,6 +1,6 @@
 push!(LOAD_PATH, "functions/")
 using BP
-using Random, Plots, SparseArrays, ITensors, Statistics, ProgressMeter, Colors, LinearAlgebra
+using Random, Plots, SparseArrays, ITensors, Statistics, ProgressMeter, Colors, LinearAlgebra, CSV, DataFrames, Dates
 include("ldpc_tanner_loops.jl")
 include("functions/tc_decode.jl")
 
@@ -311,10 +311,14 @@ end
 # println(decode(pcmat, p, numsamples; pbias = 0.1, max_loop_order = 8))
 
 # Parameters
-Ls = [3,5]
-ps = 0.002:0.001:0.01
-numsamples = 10000
+Ls = [3,5,7]
+ps = 0.00003:0.0003:0.003
+numsamples = 5000
 max_loop_order = 4
+
+# Generate filename from command line arguments or default
+filename_base = length(ARGS) > 0 ? ARGS[1] : "toric_code_results_$(Dates.format(now(), "yyyy-mm-dd_HH-MM-SS"))"
+csv_filename = "data/$(filename_base).csv"
 
 
 function red_gradient(n::Int)
@@ -325,6 +329,20 @@ function red_gradient(n::Int)
     end
 end
 
+
+# Initialize data collection
+all_results = DataFrame(
+    L = Int[],
+    p = Float64[],
+    logical_mean_loops = Float64[],
+    logical_std_loops = Float64[],
+    failure_mean_loops = Float64[],
+    failure_std_loops = Float64[],
+    logical_mean_no_loops = Float64[],
+    logical_std_no_loops = Float64[],
+    failure_mean_no_loops = Float64[],
+    failure_std_no_loops = Float64[]
+)
 
 # Generate color gradient
 colors = red_gradient(length(Ls))
@@ -377,6 +395,10 @@ for (i, L) in enumerate(Ls)
         push!(failure_means_no_loops, μ_failure_no_loops)
         push!(failure_stds_no_loops, σ_failure_no_loops)
         
+        # Add to comprehensive data collection
+        push!(all_results, (L, p, μ_logical_loops, σ_logical_loops, μ_failure_loops, σ_failure_loops,
+                           μ_logical_no_loops, σ_logical_no_loops, μ_failure_no_loops, σ_failure_no_loops))
+        
         # Update progress bar
         next!(prog, showvalues = [(:p, p), (:logical_loops, μ_logical_loops), (:logical_no_loops, μ_logical_no_loops),
                                   (:syndrome_loops, μ_failure_loops), (:syndrome_no_loops, μ_failure_no_loops)])
@@ -409,6 +431,10 @@ for (i, L) in enumerate(Ls)
           linestyle=:dash)
 end
 
+# Save all results to CSV
+CSV.write(csv_filename, all_results)
+println("Results saved to $csv_filename")
+
 # Create combined plot
 plt_combined = plot(plt_logical, plt_failure, layout=(2,1), size=(800, 800))
 
@@ -419,5 +445,5 @@ savefig(plt_failure, "visualization/toric_code_syndrome_failures.png")
 savefig(plt_combined, "visualization/toric_code_combined_metrics.png")
 
 println("Plots saved to visualization/ directory")
+println("Data saved to $csv_filename")
 println("Press Enter to exit...")
-readline()  # waits for user input
