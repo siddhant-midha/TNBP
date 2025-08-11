@@ -3,6 +3,15 @@ using BP
 using Random, Plots, SparseArrays, ITensors, Statistics, ProgressMeter, Colors, LinearAlgebra, CSV, DataFrames, Dates
 include("ldpc_tanner_loops.jl")
 include("functions/tc_decode.jl")
+include("toric_loops.jl")
+using .ToricLoops
+
+function tensorargmax(probs)
+    ix = inds(probs)[1]
+    probs = [real((probs)[ix=>n]) for n in 1:dim(ix)]
+    probs ./= sum(probs)
+    return Int(argmax(probs)-1) #sample_bit(probs[1])
+end 
 
 
 function parity_tensor(index_arr, parity)
@@ -236,56 +245,98 @@ function decode(pcmat, p, numsamples, L; pbias = 0.1, max_loop_order = 8)
         priors_loops = [ITensor([0.,0.], data_indices[i]) for i in 1:n]
         priors_no_loops = [ITensor([0.,0.], data_indices[i]) for i in 1:n]
 
-        for d = 1:n
-            ## vacuum contribution (same for both methods)
-            probs = get_marginal(vcat(data_tensors,syn_tensors),adj_mat,messages,d)
-            priors_loops[d] += probs
-            priors_no_loops[d] += probs
+        # for d = 1:n
+        #     ## vacuum contribution (same for both methods)
+        #     probs = get_marginal(vcat(data_tensors,syn_tensors),adj_mat,messages,d)
+        #     priors_loops[d] += probs
+        #     priors_no_loops[d] += probs
             
-            # Decode with loop corrections
-            ix = inds(priors_loops[d])[1]
-            probs_loops = [real((priors_loops[d])[ix=>n]) for n in 1:dim(ix)]
-            probs_loops ./= sum(probs_loops)
-            error_i_loops = sample_bit(probs_loops[1])
-            errors_loops[d] = error_i_loops
+        #     # Decode with loop corrections
+        #     ix = inds(priors_loops[d])[1]
+        #     probs_loops = [real((priors_loops[d])[ix=>n]) for n in 1:dim(ix)]
+        #     probs_loops ./= sum(probs_loops)
+        #     error_i_loops = sample_bit(probs_loops[1])
+        #     errors_loops[d] = error_i_loops
             
-            # Decode without loop corrections (use same base probabilities)
-            ix_no = inds(priors_no_loops[d])[1]
-            probs_no_loops = [real((priors_no_loops[d])[ix_no=>n]) for n in 1:dim(ix_no)]
-            probs_no_loops ./= sum(probs_no_loops)
-            error_i_no_loops = sample_bit(probs_no_loops[1])
-            errors_no_loops[d] = error_i_no_loops
+        #     # Decode without loop corrections (use same base probabilities)
+        #     ix_no = inds(priors_no_loops[d])[1]
+        #     probs_no_loops = [real((priors_no_loops[d])[ix_no=>n]) for n in 1:dim(ix_no)]
+        #     probs_no_loops ./= sum(probs_no_loops)
+        #     error_i_no_loops = sample_bit(probs_no_loops[1])
+        #     errors_no_loops[d] = error_i_no_loops
 
-            # Early termination check for loop method
-            if errors_loops[d] != errors_true[d]
-                # no point in going forward for loop method
-                break
-            end 
+        #     # Early termination check for loop method
+        #     if errors_loops[d] != errors_true[d]
+        #         # no point in going forward for loop method
+        #         break
+        #     end 
 
-            # Loop corrections (only for the loop method)
-            tannerloops = tannerloopslist[d]
+        #     # Loop corrections (only for the loop method)
+        #     tannerloops = tannerloopslist[d]
+        #     loop_list = [tannerloop.edges for tannerloop in tannerloops] 
+        #     data_bits_involved_list = [tannerloop.data_bits for tannerloop in tannerloops]
+        #     check_bits_involved_list = [tannerloop.check_bits for tannerloop in tannerloops]
+            
+        #     for (i, loop) in enumerate(loop_list)
+        #         data_bits_involved = data_bits_involved_list[i] 
+        #         check_bits_involved = check_bits_involved_list[i] 
+        #         data_bits_involved_other = collect(setdiff(data_bits_involved, [d]) )
+                
+        #         for data_bit in data_bits_involved_other
+        #             if true #all([errors_loops[bit] != -1 for bit in collect(setdiff(data_bits_involved, [data_bit]))])
+        #                 mtensors = vcat(get_marginal_data_tensors(data_tensors, data_indices, errors_loops; exclude=[data_bit]), syn_tensors)
+        #                 ## account for normalization from other nodes in the loop 
+        #                 normlz = (prod([get_marginal(mtensors,adj_mat,messages,other_data_bit) for other_data_bit in collect(setdiff(data_bits_involved, [data_bit]) )]))
+        #                 normlz *= (prod([get_marginal(mtensors,adj_mat,messages,n+check_bit) for check_bit in check_bits_involved]))
+        #                 ## update the prior of the data bit in the loop (only for loop method)
+        #                 priors_loops[data_bit] += loop_contribution(loop, messages, mtensors, edges, links, adj_mat) / normlz
+        #             end 
+        #         end 
+        #     end 
+        # end
+        # Decode each data qubit
+        for d = 1:n 
+            probs = get_marginal(vcat(data_tensors, syn_tensors), adj_mat, messages, d)
+            vacuum = tensorargmax(probs)
+            errors_no_loops[d] = vacuum
+            # Get loops for this data qubit
+            tannerloops = ToricLoops.find_toric_code_loops(pcmat, d, max_loop_order)
             loop_list = [tannerloop.edges for tannerloop in tannerloops] 
-            data_bits_involved_list = [tannerloop.data_bits for tannerloop in tannerloops]
-            check_bits_involved_list = [tannerloop.check_bits for tannerloop in tannerloops]
+            data_bits_involved_list = [tannerloop.data_qubits for tannerloop in tannerloops]
+            check_bits_involved_list = [[c - n for c in tannerloop.check_qubits] for tannerloop in tannerloops]
             
+            loopprobs = ITensor([0,0], data_indices[d])
             for (i, loop) in enumerate(loop_list)
                 data_bits_involved = data_bits_involved_list[i] 
                 check_bits_involved = check_bits_involved_list[i] 
-                data_bits_involved_other = collect(setdiff(data_bits_involved, [d]) )
+                mtensors = vcat(get_marginal_data_tensors(data_tensors, data_indices, errors; exclude=[d]), syn_tensors)
                 
-                for data_bit in data_bits_involved_other
-                    if true #all([errors_loops[bit] != -1 for bit in collect(setdiff(data_bits_involved, [data_bit]))])
-                        mtensors = vcat(get_marginal_data_tensors(data_tensors, data_indices, errors_loops; exclude=[data_bit]), syn_tensors)
-                        ## account for normalization from other nodes in the loop 
-                        normlz = (prod([get_marginal(mtensors,adj_mat,messages,other_data_bit) for other_data_bit in collect(setdiff(data_bits_involved, [data_bit]) )]))
-                        normlz *= (prod([get_marginal(mtensors,adj_mat,messages,n+check_bit) for check_bit in check_bits_involved]))
-                        ## update the prior of the data bit in the loop (only for loop method)
-                        priors_loops[data_bit] += loop_contribution(loop, messages, mtensors, edges, links, adj_mat) / normlz
-                    end 
-                end 
-            end 
+                if !isempty(setdiff(data_bits_involved, [d]))
+                    normlz1 = scalar(prod([get_marginal(mtensors, adj_mat, messages, other_data_bit) 
+                                         for other_data_bit in collect(setdiff(data_bits_involved, [d]))]))
+                else
+                    normlz1 = 1.0
+                end
+                
+                if !isempty(check_bits_involved)
+                    normlz2 = scalar(prod([get_marginal(mtensors, adj_mat, messages, n+check_bit) 
+                                         for check_bit in check_bits_involved]))
+                else
+                    normlz2 = 1.0
+                end
+                
+                normlz = normlz1 * normlz2
+                if normlz != 0
+                    change = loop_contribution(loop, messages, mtensors, edges, links, adj_mat) / normlz
+                    loopprobs += change 
+                end
+            end
+            
+            loopcorr = tensorargmax(probs + loopprobs)
+            errors_loops[d] = loopcorr
+            
         end
-        
+            
         # Check results for both methods
         (syndrome_zero_loops, homology_trivial_loops) = check_decode_edges(errors_loops, errors_true, L)
         logical_errors_loops[samp] = (syndrome_zero_loops && homology_trivial_loops) ? 0.0 : 1.0
@@ -311,9 +362,9 @@ end
 # println(decode(pcmat, p, numsamples; pbias = 0.1, max_loop_order = 8))
 
 # Parameters
-Ls = [3,5,7]
-ps = 0.00003:0.0003:0.003
-numsamples = 5000
+Ls = [3,5]
+ps = 0.00003:0.0006:0.003
+numsamples = 100
 max_loop_order = 4
 
 # Generate filename from command line arguments or default
