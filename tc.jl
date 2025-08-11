@@ -309,7 +309,7 @@ function decode(pcmat, p, numsamples, L; pbias = 0.1, max_loop_order = 8)
             for (i, loop) in enumerate(loop_list)
                 data_bits_involved = data_bits_involved_list[i] 
                 check_bits_involved = check_bits_involved_list[i] 
-                mtensors = vcat(get_marginal_data_tensors(data_tensors, data_indices, errors; exclude=[d]), syn_tensors)
+                mtensors = vcat(get_marginal_data_tensors(data_tensors, data_indices, errors_loops; exclude=[d]), syn_tensors)
                 
                 if !isempty(setdiff(data_bits_involved, [d]))
                     normlz1 = scalar(prod([get_marginal(mtensors, adj_mat, messages, other_data_bit) 
@@ -363,9 +363,9 @@ end
 
 # Parameters
 Ls = [3,5]
-ps = 0.00003:0.0006:0.003
-numsamples = 100
-max_loop_order = 4
+ps = 0.002:0.002:0.01
+numsamples = 1000
+max_loop_order = 8
 
 # Generate filename from command line arguments or default
 filename_base = length(ARGS) > 0 ? ARGS[1] : "toric_code_results_$(Dates.format(now(), "yyyy-mm-dd_HH-MM-SS"))"
