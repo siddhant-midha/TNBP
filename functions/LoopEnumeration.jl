@@ -488,3 +488,151 @@ function find_all_loops_in_graph_optimized(enumerator::LoopEnumerator, max_weigh
     
     return all_loops
 end
+
+function bfs_loop_enumeration!(enumerator::LoopEnumerator, center_vertex::Int, 
+                              max_weight::Int, found_loops::Vector{Loop})
+    """BFS-based loop enumeration with early pruning based on degree-1 nodes."""
+    
+    seen_loops = Set{Tuple{Vector{Int}, Vector{Tuple{Int,Int}}, Int}}()
+    
+    # Get all edges adjacent to center_vertex to start exploration
+    center_edges = Tuple{Int,Int}[]
+    for neighbor in enumerator.adj_list[center_vertex]
+        edge = (min(center_vertex, neighbor), max(center_vertex, neighbor))
+        push!(center_edges, edge)
+    end
+    
+    # BFS queue: each element is (current_edges, level)
+    queue = Vector{Tuple{Vector{Tuple{Int,Int}}, Int}}()
+    
+    # Initialize queue with single edges from center vertex
+    for edge in center_edges
+        push!(queue, ([edge], 1))
+    end
+    
+    while !isempty(queue)
+        current_edges, level = popfirst!(queue)
+        
+        # Check if current edge set forms a valid loop
+        if length(current_edges) >= 2
+            # Extract vertices from edges
+            vertices_set = Set{Int}()
+            for (u, v) in current_edges
+                push!(vertices_set, u)
+                push!(vertices_set, v)
+            end
+            
+            # Check if center_vertex is included and if it's a valid loop
+            if (center_vertex in vertices_set && 
+                is_valid_loop(vertices_set, current_edges))
+                
+                # Create loop and check for duplicates
+                loop = Loop(sort(collect(vertices_set)), sort(current_edges), length(current_edges))
+                canonical = canonical_loop_representation(loop)
+                
+                if !(canonical in seen_loops)
+                    push!(seen_loops, canonical)
+                    push!(found_loops, loop)
+                end
+            end
+        end
+        
+        # Stop if we've reached max weight
+        if length(current_edges) >= max_weight
+            continue
+        end
+        
+        # Early pruning: check degree-1 nodes
+        if should_prune_based_on_degree_one(current_edges, max_weight - length(current_edges))
+            continue
+        end
+        
+        # Get all possible next edges from current vertices
+        current_vertices = Set{Int}()
+        for (u, v) in current_edges
+            push!(current_vertices, u)
+            push!(current_vertices, v)
+        end
+        
+        # Add edges from current vertices
+        candidate_edges = Set{Tuple{Int,Int}}()
+        for vertex in current_vertices
+            for neighbor in enumerator.adj_list[vertex]
+                edge = (min(vertex, neighbor), max(vertex, neighbor))
+                if !(edge in current_edges)  # Don't repeat edges
+                    push!(candidate_edges, edge)
+                end
+            end
+        end
+        
+        # Add each candidate edge to the queue for the next level
+        for edge in candidate_edges
+            new_edges = copy(current_edges)
+            push!(new_edges, edge)
+            push!(queue, (new_edges, level + 1))
+        end
+    end
+end
+
+function should_prune_based_on_degree_one(current_edges::Vector{Tuple{Int,Int}}, remaining_edges::Int)
+    """
+    Early pruning heuristic: if there are more nodes with degree 1 than 2 * remaining_edges,
+    then prune because one edge can raise the degree of at most two nodes.
+    """
+    if remaining_edges <= 0
+        return false  # No pruning if no edges left to add
+    end
+    
+    # Count degree of each vertex in current subgraph
+    degree_count = Dict{Int, Int}()
+    for (u, v) in current_edges
+        degree_count[u] = get(degree_count, u, 0) + 1
+        degree_count[v] = get(degree_count, v, 0) + 1
+    end
+    
+    # Count vertices with degree 1
+    degree_one_count = 0
+    for (vertex, degree) in degree_count
+        if degree == 1
+            degree_one_count += 1
+        end
+    end
+    
+    # Pruning condition: if degree-1 nodes > 2 * remaining edges, then prune
+    # This is because each remaining edge can increase the degree of at most 2 vertices by 1
+    return degree_one_count > 2 * remaining_edges
+end
+
+function find_loops_supported_on_vertex_bfs(enumerator::LoopEnumerator, vertex::Int, max_weight::Int)
+    """Find all loops supported on a vertex using BFS with early pruning."""
+    found_loops = Loop[]
+    
+    bfs_loop_enumeration!(enumerator, vertex, max_weight, found_loops)
+    return found_loops
+end
+
+function find_all_loops_in_graph_bfs(enumerator::LoopEnumerator, max_weight::Int)
+    """Find all unique loops using BFS with early pruning based on degree-1 nodes."""
+    all_loops = Loop[]
+    seen_loops = Set{Tuple{Vector{Int}, Vector{Tuple{Int,Int}}, Int}}()
+    
+    # Enumerate from each vertex and use canonical representation for deduplication
+    for vertex in 1:enumerator.n_vertices
+        vertex_loops = find_loops_supported_on_vertex_bfs(enumerator, vertex, max_weight)
+        
+        for loop in vertex_loops
+            # Only keep loops where 'vertex' is the minimum vertex (canonical representative)
+            if vertex == minimum(loop.vertices)
+                canonical = canonical_loop_representation(loop)
+                
+                if !(canonical in seen_loops)
+                    push!(seen_loops, canonical)
+                    new_loop = Loop(sort(loop.vertices), sort(loop.edges), loop.weight)
+                    push!(all_loops, new_loop)
+                end
+            end
+        end
+    end
+    
+    return all_loops
+end
