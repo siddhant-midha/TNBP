@@ -5,6 +5,8 @@ using ITensors
 #= 
 Expectation: A list `tensors` comprising the tensors in the TN is provided, with no open indices, and correctly mapped out common indices between different tensors in the list. 
 =#
+## do check self consistency,
+## do synch updates 
 
 function get_adj_mat(tensors)
     #= get adjacency matrix, list of edges, 
@@ -56,6 +58,55 @@ function get_messages(tensors,edges,links;random_part=0)
 end 
 
 
+function check_self_consistency(tensors, messages, adj_mat; verbose=false)
+    """
+    Check the self-consistency of BP messages by verifying that each message
+    equals the tensor contracted with all incoming messages except the one being checked.
+    
+    Args:
+        tensors: Vector of ITensors in the tensor network
+        messages: Matrix of converged BP messages
+        adj_mat: Adjacency matrix of the tensor network
+        verbose: If true, prints individual error contributions
+    
+    Returns:
+        total_error: Sum of all message inconsistencies
+        max_error: Maximum individual message error
+    """
+    
+    total_error = 0.0
+    max_error = 0.0
+    
+    for (v, T) in enumerate(tensors)
+        nbrs = BP.get_nbrs(adj_mat, v)
+        
+        for n in nbrs 
+            # Get the converged message from v to n
+            converged = messages[v, n] 
+            converged = converged / norm(converged)
+            # Compute what this message should be: tensor v contracted with 
+            # all incoming messages except the one from n
+            selfconsistent = copy(T)
+            for inp in setdiff(nbrs, n)
+                selfconsistent *= messages[inp, v]
+            end 
+            selfconsistent = selfconsistent / norm(selfconsistent)
+            # Compute the error for this message
+            err_vn = norm(converged - selfconsistent)
+            
+            if verbose
+                println("Message ($v → $n): error = $err_vn")
+            end
+            
+            total_error += err_vn
+            max_error = max(max_error, err_vn)
+        end 
+    end 
+    
+    return total_error, max_error
+end
+
+
 function message_passing(tensors,messages,edges,links,adj_mat;α=1,noise=0,max_iters=1000,diagnose=false,normalise=true)
     ## tensors: tensor network 
     ## messages: matrix of message tensors {μ[v1,v2]}
@@ -65,7 +116,7 @@ function message_passing(tensors,messages,edges,links,adj_mat;α=1,noise=0,max_i
     Δ = 100 
     arr = []
     iters = 0
-    while Δ > 1e-3 && iters < max_iters
+    while Δ > 1e-12 && iters < max_iters
         iters += 1 
         δ = 0 
         for e in edges 
@@ -122,7 +173,7 @@ function message_passing(tensors,messages,edges,links,adj_mat;α=1,noise=0,max_i
 end 
 
 
-function mean_free_partition_fn(these_vertices,tensors,messages,edges,links,adj_mat)
+function mean_free_partition_fn(these_vertices,tensors,messages,adj_mat)
     ## computes the fixed point partition function at the vertices specified by these_vertices 
     ## other things as usual, these_vertices = 1:N gives the BP fixed point
     Z = 1 
@@ -277,12 +328,12 @@ function loop_contribution(loop, messages, tensors, edges, links, adj_mat)
     
     # Step 3: Contract to scalar and multiply by BP partition function on remaining vertices
     # Loop contribution (scalar) × BP partition function on vertices outside the loop
-    return scalar(loop_contri) * mean_free_partition_fn(setdiff(Set(1:N), vertices_done), tensors, messages, edges, links, adj_mat)
+    return scalar(loop_contri) * mean_free_partition_fn(setdiff(Set(1:N), vertices_done), tensors, messages, adj_mat)
 end
 
-function get_fixed_point_list(tensors,messages,edges,links,adj_mat)
+function get_fixed_point_list(tensors,messages,adj_mat)
     ## get a list of the fixed point partition function at each vertex
-    Z_l = []
+    Z_list = []
     for index = 1:length(tensors)
         nbrs = BP.get_nbrs(adj_mat, index)
         Z_local = tensors[index] 
@@ -290,16 +341,16 @@ function get_fixed_point_list(tensors,messages,edges,links,adj_mat)
             Z_local *= messages[nbr,index] 
         end
         @assert isempty(inds(Z_local))  "T[$index] must be a scalar"
-        push!(Z_l,scalar(Z_local))
+        push!(Z_list,scalar(Z_local))
     end
-    return Z_l  
+    return Z_list  
 end
 
-function normalize_tensor(tensors,Z_l)
+function normalize_tensors(tensors,Z_list)
     ## normalize the tensor network by dividing by the BP fixed point
     T_copy = copy(tensors)
     for index = 1:length(tensors)
-        T_copy[index] /= Z_l[index]
+        T_copy[index] /= Z_list[index]
     end
     return T_copy
 end
