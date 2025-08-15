@@ -29,7 +29,7 @@ function test_10x10_loop_enumeration(use_optimized::Bool = true)
     
     if use_optimized
         global_seen = Set{Tuple{Vector{Int}, Vector{Tuple{Int,Int}}, Int}}()
-        loops = find_loops_supported_on_vertex_optimized(enumerator, vertex, max_weight, global_seen)
+        loops = find_loops_supported_on_vertex_bfs(enumerator, vertex, max_weight)
     else
         loops = find_loops_supported_on_vertex(enumerator, vertex, max_weight)
     end
@@ -119,7 +119,7 @@ function test_smaller_lattices(use_optimized::Bool = true)
         start_time = time()
         if use_optimized
             global_seen = Set{Tuple{Vector{Int}, Vector{Tuple{Int,Int}}, Int}}()
-            loops = find_loops_supported_on_vertex_optimized(enumerator, vertex, max_weight, global_seen)
+            loops = find_loops_supported_on_vertex_bfs(enumerator, vertex, max_weight)
         else
             loops = find_loops_supported_on_vertex(enumerator, vertex, max_weight)
         end
@@ -159,7 +159,7 @@ function verify_loop_connectivity(use_optimized::Bool = true)
     
     if use_optimized
         global_seen = Set{Tuple{Vector{Int}, Vector{Tuple{Int,Int}}, Int}}()
-        loops = find_loops_supported_on_vertex_optimized(enumerator, vertex, max_weight, global_seen)
+        loops = find_loops_supported_on_vertex_bfs(enumerator, vertex, max_weight)
     else
         loops = find_loops_supported_on_vertex(enumerator, vertex, max_weight)
     end
@@ -221,7 +221,7 @@ function test_weight_8_loops(use_optimized::Bool = true)
     start_time = time()
     if use_optimized
         global_seen = Set{Tuple{Vector{Int}, Vector{Tuple{Int,Int}}, Int}}()
-        loops = find_loops_supported_on_vertex_optimized(enumerator, vertex, max_weight, global_seen)
+        loops = find_loops_supported_on_vertex_bfs(enumerator, vertex, max_weight)
     else
         loops = find_loops_supported_on_vertex(enumerator, vertex, max_weight)
     end
@@ -273,7 +273,7 @@ function test_translational_symmetry(use_optimized::Bool = false)
     
     if use_optimized
         global_seen = Set{Tuple{Vector{Int}, Vector{Tuple{Int,Int}}, Int}}()
-        loops_vertex_1 = find_loops_supported_on_vertex_optimized(enumerator, 1, max_weight, global_seen)
+        loops_vertex_1 = find_loops_supported_on_vertex_bfs(enumerator, 1, max_weight)
     else
         loops_vertex_1 = find_loops_supported_on_vertex(enumerator, 1, max_weight)
     end
@@ -289,7 +289,7 @@ function test_translational_symmetry(use_optimized::Bool = false)
     start_time = time()
     
     if use_optimized
-        all_unique_loops = find_all_loops_in_graph_optimized(enumerator, max_weight)
+        all_unique_loops = find_all_loops_in_graph_bfs(enumerator, max_weight)
     else
         all_unique_loops = find_all_loops_in_graph(enumerator, max_weight)
     end
@@ -340,7 +340,7 @@ function test_comprehensive_enumeration(use_optimized::Bool = true)
         start_time = time()
         if use_optimized
             global_seen = Set{Tuple{Vector{Int}, Vector{Tuple{Int,Int}}, Int}}()
-            loops = find_loops_supported_on_vertex_optimized(enumerator, 1, max_weight, global_seen)
+            loops = find_loops_supported_on_vertex_bfs(enumerator, 1, max_weight)
         else
             loops = find_loops_supported_on_vertex(enumerator, 1, max_weight)
         end
@@ -382,7 +382,7 @@ function test_weight_8_vertex_degrees(use_optimized::Bool = true)
     start_time = time()
     if use_optimized
         global_seen = Set{Tuple{Vector{Int}, Vector{Tuple{Int,Int}}, Int}}()
-        loops = find_loops_supported_on_vertex_optimized(enumerator, vertex, max_weight, global_seen)
+        loops = find_loops_supported_on_vertex_bfs(enumerator, vertex, max_weight)
     else
         loops = find_loops_supported_on_vertex(enumerator, vertex, max_weight)
     end
@@ -478,7 +478,7 @@ function benchmark_optimization_comparison()
         println("  🚀 Testing OPTIMIZED enumeration...")
         start_time = time()
         global_seen = Set{Tuple{Vector{Int}, Vector{Tuple{Int,Int}}, Int}}()
-        loops_optimized = find_loops_supported_on_vertex_optimized(enumerator, vertex, max_weight, global_seen)
+        loops_optimized = find_loops_supported_on_vertex_bfs(enumerator, vertex, max_weight)
         time_optimized = time() - start_time
         count_optimized = length(loops_optimized)
         

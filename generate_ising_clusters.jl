@@ -13,6 +13,7 @@ Usage:
 
 include("dependencies.jl")
 include("functions/ClusterEnumeration.jl")
+include("functions/loop_enumeration_square.jl")
 
 using ArgParse
 using ProgressMeter
@@ -20,20 +21,135 @@ using ProgressMeter
 # Helper function to estimate completion time
 function estimate_completion_time(L::Int, max_weight::Int)
     """Provide rough time estimates based on lattice size and weight."""
-    # Very rough estimates based on complexity
-    base_time = L^2 * max_weight^2 * 0.001  # seconds
-    
+    # Updated estimates for the new optimized approach
     if L <= 4
         return "< 1 second"
     elseif L <= 6
-        return "< 30 seconds"
+        return "< 10 seconds"
     elseif L <= 8
-        return "1-5 minutes"
+        return "10-60 seconds"
     elseif L <= 10
-        return "5-30 minutes"
+        return "1-5 minutes"
     else
-        return "30+ minutes (consider smaller parameters)"
+        return "5+ minutes (consider smaller parameters)"
     end
+end
+
+# Center site calculation
+function calculate_center_site(L::Int)
+    """Calculate the center site index for an L×L lattice."""
+    center_i = (L + 1) ÷ 2
+    center_j = (L + 1) ÷ 2
+    return (center_i - 1) * L + center_j
+end
+
+# Translation functions for loops
+function site_to_coords(site::Int, L::Int)
+    """Convert 1-indexed site to (i, j) coordinates."""
+    i = div(site - 1, L) + 1
+    j = mod(site - 1, L) + 1
+    return (i, j)
+end
+
+function coords_to_site(i::Int, j::Int, L::Int)
+    """Convert (i, j) coordinates to 1-indexed site."""
+    return (i - 1) * L + j
+end
+
+function translate_site(site::Int, di::Int, dj::Int, L::Int)
+    """Translate a site by (di, dj) on an L×L periodic lattice."""
+    i, j = site_to_coords(site, L)
+    
+    # Apply translation with periodic boundary conditions
+    new_i = mod(i - 1 + di, L) + 1
+    new_j = mod(j - 1 + dj, L) + 1
+    
+    return coords_to_site(new_i, new_j, L)
+end
+
+function translate_loop(loop::Loop, di::Int, dj::Int, L::Int)
+    """Translate a loop by (di, dj) and return the translated loop."""
+    # Translate all vertices in the loop
+    translated_vertices = [translate_site(v, di, dj, L) for v in loop.vertices]
+    translated_edges = [(translate_site(u, di, dj, L), translate_site(v, di, dj, L)) for (u, v) in loop.edges]
+    
+    # Create canonical representation
+    translated_loop = Loop(sort(translated_vertices), sort([(min(u,v), max(u,v)) for (u,v) in translated_edges]), loop.weight)
+    return translated_loop
+end
+
+function is_loop_within_bounds(loop::Loop, L::Int)
+    """Check if all vertices of a loop are within [1, L²] bounds."""
+    return all(1 <= v <= L*L for v in loop.vertices)
+end
+
+function generate_all_loops_pbc(center_loops::Vector{Loop}, L::Int)
+    """Generate all loops by translating center loops for periodic boundary conditions."""
+    all_loops = Loop[]
+    seen_loops = Set{Tuple{Vector{Int}, Vector{Tuple{Int,Int}}, Int}}()
+    
+    println("  🔄 Generating all loops via translation (PBC)...")
+    total_translations = L * L
+    progress = Progress(total_translations, dt=0.1, desc="Translating loops: ", color=:green, barlen=50)
+    
+    for di in 0:(L-1)
+        for dj in 0:(L-1)
+            for loop in center_loops
+                translated_loop = translate_loop(loop, di, dj, L)
+                canonical = canonical_loop_representation(translated_loop)
+                
+                if !(canonical in seen_loops)
+                    push!(seen_loops, canonical)
+                    push!(all_loops, translated_loop)
+                end
+            end
+            next!(progress, showvalues = [("Translation", "($di,$dj)"), ("Unique loops", "$(length(all_loops))")])
+        end
+    end
+    
+    finish!(progress)
+    println("  Generated $(length(all_loops)) unique loops from $(length(center_loops)) center loops")
+    
+    return all_loops
+end
+
+function generate_all_loops_obc(center_loops::Vector{Loop}, L::Int)
+    """Generate all loops by translating center loops for open boundary conditions."""
+    all_loops = Loop[]
+    seen_loops = Set{Tuple{Vector{Int}, Vector{Tuple{Int,Int}}, Int}}()
+    
+    println("  🔄 Generating all loops via translation (OBC)...")
+    total_translations = L * L
+    progress = Progress(total_translations, dt=0.1, desc="Translating loops: ", color=:green, barlen=50)
+    
+    discarded_count = 0
+    
+    for di in 0:(L-1)
+        for dj in 0:(L-1)
+            for loop in center_loops
+                translated_loop = translate_loop(loop, di, dj, L)
+                
+                # Check if translated loop is within bounds
+                if is_loop_within_bounds(translated_loop, L)
+                    canonical = canonical_loop_representation(translated_loop)
+                    
+                    if !(canonical in seen_loops)
+                        push!(seen_loops, canonical)
+                        push!(all_loops, translated_loop)
+                    end
+                else
+                    discarded_count += 1
+                end
+            end
+            next!(progress, showvalues = [("Translation", "($di,$dj)"), ("Unique loops", "$(length(all_loops))"), ("Discarded", "$discarded_count")])
+        end
+    end
+    
+    finish!(progress)
+    println("  Generated $(length(all_loops)) unique loops from $(length(center_loops)) center loops")
+    println("  Discarded $discarded_count out-of-bounds translations")
+    
+    return all_loops
 end
 
 
@@ -219,27 +335,17 @@ function main()
     println("  ⏱️  Estimated time: $time_estimate")
     println()
     
-    # Create lattice with progress
-    println("🏗️  Creating $(L)×$(L) square lattice with $boundary boundary conditions...")
-    lattice_progress = Progress(3, dt=0.5, desc="Setting up lattice: ", color=:blue)
-    
-    next!(lattice_progress, showvalues = [("Step", "Creating adjacency matrix")])
-    adj_matrix = create_square_lattice(L, boundary)
-    
-    next!(lattice_progress, showvalues = [("Step", "Initializing enumerator")])
-    enumerator = ClusterEnumerator(adj_matrix)
-    
-    next!(lattice_progress, showvalues = [("Step", "Lattice setup complete")])
-    finish!(lattice_progress)
+    # Note: Lattice creation is now handled by SquareLoopEnumerator during enumeration
+    println("🏗️  $(L)×$(L) square lattice will be created during enumeration with $boundary boundary conditions...")
     
     # Add boundary condition to prefix
     full_prefix = isempty(prefix) ? boundary : "$(prefix)_$(boundary)"
     
-    # Generate clusters with overall progress tracking
-    println("\n🚀 Starting cluster enumeration...")
+    # Generate clusters using the new optimized approach
+    println("\n🚀 Starting optimized cluster enumeration...")
     println("📊 This will involve 4 main steps:")
-    println("   1️⃣  Loop enumeration")
-    println("   2️⃣  Interaction graph building")
+    println("   1️⃣  Center site loop generation")
+    println("   2️⃣  Loop translation and expansion")
     println("   3️⃣  Cluster enumeration per site")
     println("   4️⃣  Data saving and analysis")
     println()
@@ -247,13 +353,78 @@ function main()
     start_time = time()
     
     try
-        # Track enumeration progress
-        println("⏳ Enumeration will begin shortly...")
-        println("   (Progress bars will appear for each major step)")
-        println()
+        # Step 1: Generate loops supported on center site
+        center_site = calculate_center_site(L)
+        center_coords = site_to_coords(center_site, L)
+        println("📍 Step 1: Generating loops on center site $center_site (coordinates $center_coords)...")
         
-        data = enumerate_all_clusters_all_sites(enumerator, max_weight, max_loop_weight; 
-                                               prefix=full_prefix)
+        # Use SquareLoopEnumerator for optimized performance
+        enumerator_square = SquareLoopEnumerator(L; periodic=(boundary == "periodic"))
+        center_loops = find_loops_supported_on_vertex_square(enumerator_square, center_site, max_loop_weight)
+        
+        println("  Found $(length(center_loops)) loops supported on center site")
+        
+        # Step 2: Generate all loops via translation
+        println("\n🔄 Step 2: Generating all loops via translation...")
+        if boundary == "periodic"
+            all_loops = generate_all_loops_pbc(center_loops, L)
+        else
+            all_loops = generate_all_loops_obc(center_loops, L)
+        end
+        
+        # Step 3: Build interaction graph and enumerate clusters
+        println("\n🔗 Step 3: Building interaction graph and enumerating clusters...")
+        interaction_graph = build_interaction_graph_optimized(all_loops)
+        
+        # Enumerate clusters for each site (following one_site_old.jl pattern)
+        clusters_by_site = Dict{Int, Vector{Cluster}}()
+        n_sites = L * L
+        
+        println("  Processing $(n_sites) sites...")
+        site_progress = Progress(n_sites, dt=0.1, desc="Sites processed: ", color=:cyan, barlen=50)
+        
+        for site in 1:n_sites
+            # Find loops supported on this site
+            supported_loop_ids = Int[]
+            for (i, loop) in enumerate(all_loops)
+                if site in loop.vertices
+                    push!(supported_loop_ids, i)
+                end
+            end
+            
+            if !isempty(supported_loop_ids)
+                # Enumerate clusters for this site
+                site_clusters = dfs_enumerate_clusters_from_supported(all_loops, supported_loop_ids, 
+                                                                    max_weight, interaction_graph)
+                # Remove redundancies
+                unique_clusters = remove_cluster_redundancies(site_clusters)
+                clusters_by_site[site] = unique_clusters
+            else
+                clusters_by_site[site] = Cluster[]
+            end
+            
+            next!(site_progress)
+        end
+        
+        finish!(site_progress)
+        
+        # Step 4: Create data structure and save
+        println("\n💾 Step 4: Creating data structure and saving...")
+        enumeration_time = time() - start_time
+        
+        data = ClusterEnumerationData(
+            clusters_by_site,
+            all_loops,
+            enumerator_square.base_enumerator.adj_matrix,
+            max_weight,
+            L,
+            enumeration_time,
+            string(now()),
+            n_sites
+        )
+        
+        # Save results
+        save_cluster_enumeration(data, full_prefix)
         
         println("\n✅ Core enumeration completed!")
         
