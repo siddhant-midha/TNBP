@@ -226,6 +226,7 @@ function decode(pcmat, p, numsamples, L; pbias = 0.1, max_loop_order = 8)
     
     # Create progress bar for samples
     sample_prog = Progress(numsamples, desc="Samples: ", showspeed=true)
+    update_interval = max(1, div(numsamples, 100))  # Update every 1%
     
     for samp in 1:numsamples
         # Sample errors iid with probability p
@@ -346,8 +347,10 @@ function decode(pcmat, p, numsamples, L; pbias = 0.1, max_loop_order = 8)
         logical_errors_no_loops[samp] = (syndrome_zero_no_loops && homology_trivial_no_loops) ? 0.0 : 1.0
         failure_rate_no_loops[samp] = syndrome_zero_no_loops ? 0.0 : 1.0
         
-        # Update sample progress
-        next!(sample_prog)
+        # Update sample progress only every 1%
+        if samp % update_interval == 0 || samp == numsamples
+            ProgressMeter.update!(sample_prog, samp)
+        end
     end
     
     return (mean(logical_errors_loops), std(logical_errors_loops), mean(failure_rate_loops), std(failure_rate_loops),
@@ -362,10 +365,10 @@ end
 # println(decode(pcmat, p, numsamples; pbias = 0.1, max_loop_order = 8))
 
 # Parameters
-Ls = [3,5]
-ps = 0.002:0.002:0.01
+Ls = [3,5,7,9,11]
+ps = 0.001:0.001:0.02
 numsamples = 1000
-max_loop_order = 8
+max_loop_order = 12
 
 # Generate filename from command line arguments or default
 filename_base = length(ARGS) > 0 ? ARGS[1] : "toric_code_results_$(Dates.format(now(), "yyyy-mm-dd_HH-MM-SS"))"
