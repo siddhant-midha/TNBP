@@ -2,8 +2,42 @@ using ITensors, ITensorMPS, Plots, LaTeXStrings
 using ProgressMeter, Graphs, LinearAlgebra
 using Combinatorics
 using Statistics
+using Test
+using Serialization
+
+include("dependencies.jl")
+include("functions/ClusterEnumeration.jl")
+include("functions/boundary_evolution.jl")
+
 push!(LOAD_PATH, "functions/")
 using BP
+
+function load_latest_cluster_file(N,w)
+    """Load the most recent cluster enumeration file."""
+    save_dir = "saved_clusters"
+    
+    if !isdir(save_dir)
+        error("No saved_clusters directory found!")
+    end
+    
+    # Look for files matching our criteria (weight 10, size 11, PBC)
+    files = readdir(save_dir)
+    
+    matching_files = filter(f -> contains(f, "L$N") && contains(f, "w$w"), files)
+    
+    latest_file = sort(matching_files)[end]
+    filepath = joinpath(save_dir, latest_file)
+    
+    println("📖 Loading cluster data from: $(latest_file)")
+    
+    loaded_data = open(filepath, "r") do io
+        deserialize(io)
+    end
+    
+    return loaded_data["data"]
+end
+
+
 
 function ortho(T::ITensor, v::Vector{Float64})
     indx = inds(T)
@@ -121,87 +155,9 @@ function peps_controllable(N, T; η=0, ti=true, orthog=true, noise = 0, biasing 
 end
 
 
-"""
-    contract_peps_no_phys(peps::Matrix{ITensor}; cutoff=1E-8, maxdim=100)
-
-Approximately contracts a 2D PEPS tensor network that has no physical indices.
-The network is contracted to a single scalar value (its norm).
-
-The PEPS is contracted row-by-row from top to bottom using the boundary MPS method.
-The first row is contracted into an MPS. Then, each subsequent bulk row is
-treated as an MPO and applied to the boundary MPS. Finally, the last row,
-treated as an MPS, is contracted with the result.
-
-Arguments:
-- `peps`: A 2D array (Matrix) of ITensors representing the PEPS without physical legs.
-- `cutoff`: The truncation error cutoff for SVD during MPO-MPS application.
-- `maxdim`: The maximum allowed bond dimension for the boundary MPS.
-
-Returns:
-- A complex number representing the full contraction of the PEPS.
-"""
-function contract_peps_no_phys(peps::Matrix{ITensor}; cutoff=1E-8, maxdim=100)
-    Ny, Nx = size(peps)
-    if Ny < 2
-        error("PEPS must have at least 2 rows for this contraction method.")
-    end
-
-    # --- 1. Contract the first row into an MPS ---
-    # This MPS becomes the initial top boundary. Its site indices are the
-    # downward-pointing virtual indices of the first row.
-    # println("Contracting first row into boundary MPS...")
-    boundary_mps = MPS(peps[1, :])
-
-    # --- 2. Iteratively contract the bulk rows (2 to Ny-1) ---
-    # println("Contracting bulk rows...")
-    for i in 2:(Ny - 1)
-        # println("  Applying MPO from row $i / $Ny")
-
-        # The site indices of our current boundary_mps are the virtual indices
-        # connecting the previously contracted part to the current row.
-        top_links = siteinds(boundary_mps)
-
-        # Construct an MPO from the PEPS row. We must prime the top virtual
-        # links of the PEPS tensors so the MPO constructor correctly identifies
-        # them as the "input" site indices.
-        mpo_tensors = [prime(peps[i,j], top_links[j]) for j in 1:Nx]
-        row_mpo = MPO(mpo_tensors)
-
-        # Prime the boundary MPS to match the MPO's input site indices.
-        boundary_mps_p = prime(boundary_mps)
-
-        # Apply the MPO. The resulting MPS will have the MPO's output site
-        # indices (the unprimed bottom_links of the PEPS row) as its new site indices.
-        boundary_mps = apply(row_mpo, boundary_mps_p; cutoff=cutoff, maxdim=maxdim)
-    end
-
-    # --- 3. Contract with the final row ---
-    # println("Contracting with final row...")
-    # The last row of the PEPS is treated as an MPS.
-    final_row_mps = MPS(peps[Ny, :])
-
-    # The site indices of `boundary_mps` (from the bulk) and `final_row_mps`
-    # are the same set of virtual indices connecting row Ny-1 and Ny.
-    # The inner product gives the final scalar result.
-    result = inner(boundary_mps, final_row_mps)
-
-    # println("Contraction finished.")
-    return (result)
-end
 
 
-
-function get_marginal(tensors,adj_mat,messages,index)
-    nbrs = BP.get_nbrs(adj_mat, index)
-    Z_local = tensors[index] 
-    for nbr in nbrs
-        Z_local *= messages[nbr,index] 
-    end
-    return Z_local
-end 
-
-
-function bp_contract(tensors; maxiter=200, annealing=0.9, normalise=true)
+function bp_contract(tensors, loops; maxiter=500, annealing=0.9, normalise=true)
     """
     Performs belief propagation contraction on a tensor network.
     
@@ -214,42 +170,50 @@ function bp_contract(tensors; maxiter=200, annealing=0.9, normalise=true)
     Returns:
         Z: The contracted value (product of marginals)
     """
-    
     adj_mat, edges, links = BP.get_adj_mat(tensors)
     messages = BP.get_messages(tensors, edges, links) 
-    messages = BP.message_passing(tensors, messages, edges, links, adj_mat; 
-                                 α=annealing, max_iters=maxiter, diagnose=false, normalise=normalise)
-    
-    marginals = [get_marginal(tensors, adj_mat, messages, index) for index = 1:length(tensors)]
-    Z = prod(marginals)
-    
-    return scalar(Z)
+    messages  = BP.message_passing(tensors, messages, edges, adj_mat; 
+                                    α=annealing, max_iters=maxiter, diagnose=false, normalise=normalise)
+    Z_list = BP.get_fixed_point_list(tensors,messages,adj_mat)    
+    tensors = BP.normalize_tensors(tensors,Z_list)                      
+    Z = prod(Z_list)
+    contribution = 0
+    for loop in loops
+        if all([e in edges for e in loop])
+            contr = scalar(BP.loop_contribution(loop, messages, tensors, edges, links, adj_mat))
+            contribution += contr
+        end
+    end 
+    return Z, Z * (1 + contribution)
 end
 
-
-# Parameters
-N = 4
-T = 4
-η_range = 0.0001:0.01:0.5  # Test η from 0 to 1 in steps of 0.1
-nsamples = 1000  # Number of samples per η value
-
+N = 4 
+T = N
+η_range = 0.1:0.1:2. 
+nsamples = 100
+w = 8
+data = load_latest_cluster_file(N,w)
+loop_objects = data.all_loops
+loops = [loop_object.edges for loop_object in loop_objects]
 # Fixed parameters
 noise = 0
 ti = true   
 orthog = false   
 normalise = true 
-
+annealing = .9 
+maxiter = 500
 # Storage for results
 η_vals = collect(η_range)
-mean_errors = Float64[]
-std_errors = Float64[]
+mean_errors_bp = Float64[]
+mean_errors_loop = Float64[]
 
 println("Comparing contraction methods...")
 
 for η in η_vals
     println("Testing η = $η")
     
-    relative_errors = Float64[]
+    relative_errors_bp = Float64[]
+    relative_errors_loop = Float64[]
     
     for sample in 1:nsamples
         # Generate random PEPS
@@ -258,37 +222,55 @@ for η in η_vals
         # Exact contraction
         exact_result = contract_peps_no_phys(peps; cutoff=1E-9, maxdim=32)
         
-        # BP contraction  
-        bp_result = bp_contract(tensors; maxiter=500, annealing=0.9, normalise=normalise)
+        # BP contraction (returns both Z and Z+Zloop)
+        bp_result, loop_corrected_result = bp_contract(tensors, loops; maxiter=maxiter, annealing=annealing, normalise=normalise)
         
-        # Compute relative error
-        if abs(exact_result) > 1e-12  # Avoid division by very small numbers
-            rel_error = abs(bp_result - exact_result) / abs(exact_result)
+        # Compute relative errors for both methods
+        if abs(exact_result) > 1.  # Avoid division by very small numbers
+            rel_error_bp = abs(bp_result - exact_result) / abs(exact_result)
+            rel_error_loop = abs(loop_corrected_result - exact_result) / abs(exact_result)
         else
-            rel_error = abs(bp_result - exact_result)  # Absolute error if exact is ~0
+            rel_error_bp = abs(bp_result - exact_result)  # Absolute error if exact is ~0
+            rel_error_loop = abs(loop_corrected_result - exact_result)
         end
         
-        push!(relative_errors, rel_error)
+        push!(relative_errors_bp, rel_error_bp)
+        push!(relative_errors_loop, rel_error_loop)
     end
     
-    # Compute statistics
-    push!(mean_errors, mean(relative_errors))
-    push!(std_errors, std(relative_errors))
+    # Compute mean errors
+    push!(mean_errors_bp, mean(relative_errors_bp))
+    push!(mean_errors_loop, mean(relative_errors_loop))
     
-    println("  Mean relative error: $(mean_errors[end])")
-    println("  Std relative error: $(std_errors[end])")
+    println("  Mean BP error: $(mean_errors_bp[end])")
+    println("  Mean loop-corrected error: $(mean_errors_loop[end])")
 end
 
-# Plot the results
-p = plot(η_vals, mean_errors, 
-         ribbon=std_errors,
+# Plot both results on the same plot
+p = plot(η_vals, mean_errors_bp, 
          linewidth=2,
+         markershape=:circle,
+         markersize=4,
+         label="Standard BP",
+         color=:blue,
+         xlabel="η",
+         ylabel="Relative Error",
+         title="BP vs Loop-Corrected PEPS Contraction Error",
+         yscale=:log10,
          grid=true,
          legend=:topleft,
          size=(600, 400))
 
+# Add loop-corrected results
+plot!(p, η_vals, mean_errors_loop,
+      linewidth=2,
+      markershape=:square,
+      markersize=4,
+      label="Loop-Corrected BP",
+      color=:red)
+
 # Add some styling
-plot!(p)
+plot!(p, xlims=(minimum(η_vals)-0.01, maximum(η_vals)+0.01))
 
 display(p)
 
@@ -296,7 +278,9 @@ display(p)
 println("\nSummary:")
 println("η range: $(minimum(η_vals)) to $(maximum(η_vals))")
 println("Samples per η: $nsamples")
-println("Min mean error: $(minimum(mean_errors))")
-println("Max mean error: $(maximum(mean_errors))")
+println("Min mean BP error: $(minimum(mean_errors_bp))")
+println("Max mean BP error: $(maximum(mean_errors_bp))")
+println("Min mean loop-corrected error: $(minimum(mean_errors_loop))")
+println("Max mean loop-corrected error: $(maximum(mean_errors_loop))")
 
-readline() 
+readline()
