@@ -26,13 +26,13 @@ function contract_peps_no_phys(peps::Matrix{ITensor}; cutoff=1E-8, maxdim=100)
     # --- 1. Contract the first row into an MPS ---
     # This MPS becomes the initial top boundary. Its site indices are the
     # downward-pointing virtual indices of the first row.
-    println("Contracting first row into boundary MPS...")
+    # println("Contracting first row into boundary MPS...")
     boundary_mps = MPS(peps[1, :])
 
     # --- 2. Iteratively contract the bulk rows (2 to Ny-1) ---
-    println("Contracting bulk rows...")
+    # println("Contracting bulk rows...")
     for i in 2:(Ny - 1)
-        println("  Applying MPO from row $i / $Ny")
+        # println("  Applying MPO from row $i / $Ny")
 
         # The site indices of our current boundary_mps are the virtual indices
         # connecting the previously contracted part to the current row.
@@ -53,7 +53,7 @@ function contract_peps_no_phys(peps::Matrix{ITensor}; cutoff=1E-8, maxdim=100)
     end
 
     # --- 3. Contract with the final row ---
-    println("Contracting with final row...")
+    # println("Contracting with final row...")
     # The last row of the PEPS is treated as an MPS.
     final_row_mps = MPS(peps[Ny, :])
 
@@ -62,7 +62,7 @@ function contract_peps_no_phys(peps::Matrix{ITensor}; cutoff=1E-8, maxdim=100)
     # The inner product gives the final scalar result.
     result = inner(boundary_mps, final_row_mps)
 
-    println("Contraction finished.")
+    # println("Contraction finished.")
     return result
 end
 
