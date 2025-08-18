@@ -135,11 +135,11 @@ end
 
 function bit_to_onehot(x)
     if x == 0
-        return [2, 0]
+        return [1, 0]
     elseif x == 1
-        return [0, 2]
+        return [0, 1]
     elseif x == -1
-        return [1, 1]
+        return [1, 1] ./ 2
     else
         error("Input must be -1, 0, or 1")
     end
