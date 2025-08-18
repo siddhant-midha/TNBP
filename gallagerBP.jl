@@ -160,8 +160,6 @@ function loops_regular_code_sim_batched(n, d_v, d_c, p, num_batches, samples_per
     for batch in 1:num_batches
         println("batch=$batch")
         pcmat = gallager_ldpc_matrix(n, d_v, d_c)
-        m, n = size(pcmat)
-        k = n - m
         tannerloopslist = [find_tanner_loops(pcmat, d; max_length=max_loop_order) for d in 1:n]
         # Track errors within this batch
         batch_logical_errors_loops = 0
@@ -222,6 +220,12 @@ function loops_regular_code_sim_batched(n, d_v, d_c, p, num_batches, samples_per
                 
                 loopcorr = tensorargmax(probs + loopprobs)
                 errors_loops[d] = loopcorr
+
+                # Early stopping: if both decoders made errors, no point continuing
+                if (errors_no_loops[d] != errors_true[d]) && (errors_loops[d] != errors_true[d]) 
+                    break
+                end 
+
                 
             end
             
