@@ -63,14 +63,14 @@ function create_open_square_lattice(L::Int)
     for i in 0:L-1, j in 0:L-1
         current = coord_to_vertex_index(i, j, L)
         
-        # Right neighbor (within bounds)
+        # Right neighbor (within bounds only)
         if j < L-1
             right = coord_to_vertex_index(i, j+1, L)
             adj_matrix[current, right] = 1
             adj_matrix[right, current] = 1
         end
         
-        # Down neighbor (within bounds)  
+        # Down neighbor (within bounds only)  
         if i < L-1
             down = coord_to_vertex_index(i+1, j, L)
             adj_matrix[current, down] = 1
@@ -80,7 +80,6 @@ function create_open_square_lattice(L::Int)
     
     return adj_matrix
 end
-
 # ========== D4 Symmetry Transformations ==========
 
 """Apply coordinate transformation with boundary condition awareness"""
@@ -200,26 +199,25 @@ mutable struct SquareLoopState
     deg::Dict{Coord,Int}        # current degrees within the subgraph
 end
 
-"""Get neighbors of a coordinate with boundary condition awareness"""
+"""Get neighbors by directly checking adjacency matrix"""
 function get_coord_neighbors(v::Coord, L::Int, periodic::Bool)
     neighbors = Coord[]
-    candidates = [(v[1]+1, v[2]), (v[1]-1, v[2]), (v[1], v[2]+1), (v[1], v[2]-1)]
+    v_idx = coord_to_vertex_index(v[1], v[2], L)
     
-    for candidate in candidates
-        if periodic
-            # Wrap coordinates for periodic boundaries
-            wrapped = (mod(candidate[1], L), mod(candidate[2], L))
-            push!(neighbors, wrapped)
-        else
-            # Check bounds for open boundaries
-            if 0 <= candidate[1] < L && 0 <= candidate[2] < L
-                push!(neighbors, candidate)
-            end
+    # Get adjacency matrix
+    adj_matrix = periodic ? create_periodic_square_lattice(L) : create_open_square_lattice(L)
+    
+    # Check all possible vertices
+    for u_idx in 1:(L*L)
+        if adj_matrix[v_idx, u_idx] == 1
+            u_coord = vertex_index_to_coord(u_idx, L)
+            push!(neighbors, u_coord)
         end
     end
     
     return neighbors
 end
+
 
 """Compute frontier edges: all lattice edges with ≥1 endpoint in V that are not yet in E"""
 function frontier_edges(V::Set{Coord}, E::Set{Edge}, L::Int, periodic::Bool)
@@ -228,13 +226,23 @@ function frontier_edges(V::Set{Coord}, E::Set{Edge}, L::Int, periodic::Bool)
         for u in get_coord_neighbors(v, L, periodic)
             e = norm_edge(v, u)
             if !(e in E)
-                push!(F, e)
+                # For open boundaries, double-check that this is a valid lattice edge
+                if !periodic
+                    # Only add edges between immediate grid neighbors (not wrapping)
+                    dx = abs(v[1] - u[1])
+                    dy = abs(v[2] - u[2])
+                    # Valid edge: Manhattan distance = 1 and no coordinate wrapping
+                    if (dx == 1 && dy == 0) || (dx == 0 && dy == 1)
+                        push!(F, e)
+                    end
+                else
+                    push!(F, e)
+                end
             end
         end
     end
     return F
 end
-
 """Add an edge and update degrees/vertex set"""
 function add_edge(s::SquareLoopState, e::Edge)
     (u,v) = e
