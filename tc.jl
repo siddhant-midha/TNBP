@@ -3,106 +3,9 @@ using BP
 using Random, Plots, SparseArrays, ITensors, Statistics, ProgressMeter, Colors, LinearAlgebra, CSV, DataFrames, Dates
 include("ldpc_tanner_loops.jl")
 include("functions/tc_decode.jl")
+include("functions/decoding.jl")
 include("toric_loops.jl")
 using .ToricLoops
-
-function tensorargmax(probs)
-    ix = inds(probs)[1]
-    probs = [real((probs)[ix=>n]) for n in 1:dim(ix)]
-    probs ./= sum(probs)
-    return Int(argmax(probs)-1) #sample_bit(probs[1])
-end 
-
-
-function parity_tensor(index_arr, parity)
-    num = length(index_arr)
-    tens = ITensor(index_arr)
-    for i in 0:(2^num - 1)
-        bits = digits(i, base=2, pad=num) 
-        if sum(bits) % 2 == parity
-            inds_tuple = (index_arr[j] => bits[j] + 1 for j in 1:num)
-            tens[inds_tuple...] = 1.0        
-        end 
-    end
-    return tens 
-end 
-
-function get_nbrs_of_check(adj_mat, v)
-    ## get nbrs of node v from adj_mat
-    row = adj_mat[v, :]
-    return findall(x -> x == 1, row)
-end
-
-function get_nbrs_of_data(adj_mat, v)
-    ## get nbrs of node v from adj_mat
-    col = adj_mat[:, v]
-    return findall(x -> x == 1, col)
-end
-
-function get_network(pcmat, syndrome, pbias)
-    ## pcmat: (n-k) x (n)
-    ## syndrome: (n-k)
-    ## close syndrome legs with given syndrome, keeps data legs open for later
-    m, n = size(pcmat)
-    k = n - m 
-    indmat = [Index(2, "s$(i)d$(j)") for i in 1:m, j in 1:n]
-    datainds = [Index(2, "x$i") for i in 1:n]
-    data_tensors = []
-    syn_tensors = []
-
-    ## data data_tensors
-
-    for i = 1:n 
-        dummy = Index(2, "biasi")
-        biastensor = ITensor(2 .* [1-pbias, pbias],dummy)
-        checks = get_nbrs_of_data(pcmat,i)
-        indxs = [indmat[jj,i] for jj in checks]
-        push!(indxs,dummy)
-        push!(indxs,datainds[i])
-        push!(data_tensors,(delta(indxs) * biastensor))
-    end 
-
-    ## check tensors 
-    for j = 1:m
-        datas = get_nbrs_of_check(pcmat,j)
-        tensor = parity_tensor([indmat[j,ii] for ii in datas],syndrome[j])
-        push!(syn_tensors,tensor)
-    end 
-    return data_tensors, syn_tensors, datainds
-end 
-
-
-function bit_to_onehot(x)
-    if x == 0
-        return [2, 0]
-    elseif x == 1
-        return [0, 2]
-    elseif x == -1
-        return [1, 1]
-    else
-        error("Input must be -1, 0, or 1")
-    end
-end
-
-
-function get_marginal_data_tensors(data_tensors,data_indices,data_inputs;exclude=[])
-    N = length(data_tensors)
-    marginalized = []
-    for i = 1 : N 
-        if !(i in exclude)
-            tens = data_tensors[i] *  ITensor(bit_to_onehot(data_inputs[i]),data_indices[i])
-        else 
-            tens = data_tensors[i]
-        end 
-        push!(marginalized,tens)
-    end 
-    return marginalized
-end 
-
-
-function sample_bit(p0)
-    return rand() < p0 ? 0 : 1
-end
 
 
 function toric_code_X_parity_matrix(L::Int)
@@ -131,15 +34,6 @@ function toric_code_X_parity_matrix(L::Int)
     
     return pcmat
 end
-
-function get_marginal(tensors,adj_mat,messages,index)
-    nbrs = BP.get_nbrs(adj_mat, index)
-    Z_local = tensors[index] 
-    for nbr in nbrs
-        Z_local *= messages[nbr,index] 
-    end
-    return Z_local
-end 
 
 
 function decode(pcmat, p, numsamples, L; pbias = 0.1, max_loop_order = 8)
