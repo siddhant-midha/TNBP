@@ -94,3 +94,55 @@ function load_latest_test_file()
     
     error("No suitable test files found for deduplication testing")
 end
+
+function load_latest_single_site_cluster_file(; size_filter="L11", weight_filter="", boundary_filter="periodic")
+    """
+    Load the most recent single-site cluster enumeration file matching criteria.
+    Returns the data and filename for reference.
+    """
+    save_dir = "saved_clusters"
+    
+    if !isdir(save_dir)
+        error("No saved_clusters directory found!")
+    end
+    
+    files = readdir(save_dir)
+    
+    # Filter files based on criteria - must contain "single_site"
+    matching_files = filter(files) do f
+        # Must be a .jld2 file
+        !endswith(f, ".jld2") && return false
+        
+        # Must contain "single_site" in filename
+        !contains(f, "single_site") && return false
+        
+        # Must contain size filter
+        !contains(f, size_filter) && return false
+        
+        # Must contain boundary filter
+        !contains(f, boundary_filter) && return false
+        
+        # If weight filter specified, must contain it
+        if !isempty(weight_filter)
+            !contains(f, weight_filter) && return false
+        end
+        
+        return true
+    end
+    
+    if isempty(matching_files)
+        error("No matching single-site cluster files found for criteria: size=$size_filter, weight=$weight_filter, boundary=$boundary_filter")
+    end
+    
+    # Sort by filename (which includes timestamp) and take the most recent
+    latest_file = sort(matching_files)[end]
+    filepath = joinpath(save_dir, latest_file)
+    
+    println("📖 Loading latest single-site cluster data: $(latest_file)")
+    
+    loaded_data = open(filepath, "r") do io
+        deserialize(io)
+    end
+    
+    return loaded_data["data"], latest_file
+end
