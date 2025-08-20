@@ -655,4 +655,204 @@ function mean_free_partition_fn(these_vertices,tensors,messages,adj_mat)
     return prod([Z_list[v] for v in these_vertices])
 end
 
+function selective_message_passing(tensors, messages, selected_edges, edges, adj_mat; α=1, noise=0, max_iters=1000, diagnose=false, normalise=true)
+    """
+    Iterative belief propagation message passing for tensor networks on selected edges only.
+    
+    This function performs BP updates only on a subset of edges while keeping messages
+    on all other edges fixed. Useful for local refinement, loop corrections, or 
+    analyzing specific subgraphs without global message updates.
+    
+    INPUTS:
+    -------
+    tensors : Vector{ITensor}
+        Vector of ITensors in the network
+        
+    messages : Matrix{ITensor}
+        Current message matrix μ[i,j] from vertex i to j
+        Messages on non-selected edges remain unchanged
+        
+    selected_edges : Vector{Tuple{Int,Int}}
+        List of edges to update, each as (v1,v2) with v1 < v2 convention
+        Only messages on these edges will be modified during iteration
+        
+    edges : Vector{Tuple{Int,Int}}
+        Complete list of all edges in tensor network, with v1 < v2 convention
+        Used for consistency checking and edge indexing
+        
+    adj_mat : Matrix{Int32}
+        Adjacency matrix of the tensor network graph
+        adj_mat[i,j] = 1 if vertices i,j are connected, 0 otherwise
+        
+    α : Float64, optional (default: 1)
+        Damping factor. α=1 for instant updates, α<1 for annealed convergence
+        
+    noise : Float64, optional (default: 0)
+        Random noise amplitude added each iteration for numerical stability
+        
+    max_iters : Int, optional (default: 1000)
+        Maximum iterations before stopping
+        
+    diagnose : Bool, optional (default: false)
+        If true, returns convergence history along with messages
+        
+    normalise : Bool, optional (default: true)
+        Whether to normalize messages each iteration
+    
+    OUTPUTS:
+    --------
+    Matrix{ITensor} : Updated message matrix with selective edge updates
+    Vector{Float64} : Convergence history (only if diagnose=true)
+    
+    ALGORITHM:
+    ----------
+    1. Identify vertices involved in selected edges (active vertices)
+    2. For each iteration:
+       - Update messages only on selected edges
+       - For active vertices: contract tensor with ALL incoming messages 
+         (both fixed messages from non-selected edges and updating messages)
+       - Apply damping, noise, and normalization as in standard BP
+    3. Converge when ||Δmessages|| < 1e-12 on selected edges only
+    
+    PHYSICS MOTIVATION:
+    -------------------
+    - Local refinement: Improve messages in specific graph regions
+    - Loop corrections: Update messages around detected loops
+    - Hierarchical BP: Coarse-grain some edges while refining others
+    - Debugging: Isolate problematic edges for convergence analysis
+    
+    EXAMPLE:
+    --------
+    ```julia
+    # Update only edges forming a triangle
+    triangle_edges = [(1,2), (2,3), (3,1)]
+    updated_messages = BP.selective_message_passing(
+        tensors, messages, triangle_edges, edges, adj_mat; 
+        α=0.8, max_iters=100
+    )
+    
+    # Update single problematic edge
+    problem_edge = [(4,5)]
+    refined_messages = BP.selective_message_passing(
+        tensors, messages, problem_edge, edges, adj_mat;
+        α=0.5, max_iters=50
+    )
+    ```
+    
+    NOTES:
+    ------
+    - Active vertices are those connected to at least one selected edge
+    - Non-selected edges maintain their input message values exactly
+    - Convergence measured only on selected edge message changes
+    - Computational cost scales with number of selected edges and active vertices
+    """
+    
+    # Identify active vertices (those connected to selected edges)
+    active_vertices = Set{Int}()
+    for (v1, v2) in selected_edges
+        push!(active_vertices, v1)
+        push!(active_vertices, v2)
+    end
+    
+    # Verify selected edges are subset of total edges
+    for edge in selected_edges
+        if !(edge in edges)
+            throw(ArgumentError("Selected edge $edge not found in global edge list"))
+        end
+    end
+    
+    # Initialize convergence tracking
+    Δ = 100.0
+    convergence_history = Float64[]
+    iters = 0
+    
+    # Create working copy of messages to avoid modifying input
+    working_messages = copy(messages)
+    
+    while Δ > 1e-12 && iters < max_iters
+        iters += 1
+        δ = 0.0
+        
+        # Forward pass: update v1 → v2 for each selected edge
+        for selected_edge in selected_edges
+            v1, v2 = selected_edge
+            
+            # Verify message exists and is non-zero
+            @assert norm(working_messages[v1, v2]) > 1e-12 "Message [$v1 → $v2] decaying to zero!"
+            
+            # Contract tensor v1 with ALL incoming messages (both fixed and updating)
+            update = tensors[v1]
+            for nbr in get_nbrs(adj_mat, v1)
+                if nbr != v2  # Exclude outgoing message direction
+                    update = update * working_messages[nbr, v1]
+                end
+            end
+            
+            # Normalize if requested
+            new_message = normalise ? update / norm(update) : update
+            
+            # Track convergence for this edge
+            δ += norm(working_messages[v1, v2] - new_message)
+            
+            # Apply damping and noise
+            edge_index = inds(working_messages[v1, v2])[1]
+            working_messages[v1, v2] = (1 - α) * working_messages[v1, v2] + α * new_message
+            
+            if noise > 0
+                working_messages[v1, v2] += noise * ITensor(randn(dim(edge_index)), edge_index)
+            end
+            
+            # Final normalization
+            if normalise
+                working_messages[v1, v2] = working_messages[v1, v2] / norm(working_messages[v1, v2])
+            end
+        end
+        
+        # Backward pass: update v2 → v1 for each selected edge  
+        for selected_edge in selected_edges
+            v1, v2 = selected_edge
+            
+            # Update in reverse direction: v2 → v1
+            @assert norm(working_messages[v2, v1]) > 1e-12 "Message [$v2 → $v1] decaying to zero!"
+            
+            # Contract tensor v2 with ALL incoming messages
+            update = tensors[v2]
+            for nbr in get_nbrs(adj_mat, v2)
+                if nbr != v1  # Exclude outgoing message direction
+                    update = update * working_messages[nbr, v2]
+                end
+            end
+            
+            # Normalize if requested
+            new_message = normalise ? update / norm(update) : update
+            
+            # Track convergence for this edge
+            δ += norm(working_messages[v2, v1] - new_message)
+            
+            # Apply damping and noise
+            edge_index = inds(working_messages[v2, v1])[1]
+            working_messages[v2, v1] = (1 - α) * working_messages[v2, v1] + α * new_message
+            
+            if noise > 0
+                working_messages[v2, v1] += noise * ITensor(randn(dim(edge_index)), edge_index)
+            end
+            
+            # Final normalization
+            if normalise
+                working_messages[v2, v1] = working_messages[v2, v1] / norm(working_messages[v2, v1])
+            end
+        end
+        
+        # Update convergence tracking
+        Δ = δ
+        push!(convergence_history, δ)
+    end
+    
+    if diagnose
+        return working_messages, convergence_history
+    else
+        return working_messages
+    end
+end
+
 end
