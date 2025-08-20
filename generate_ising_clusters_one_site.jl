@@ -4,11 +4,11 @@
 generate_ising_clusters_one_site.jl
 
 Generate and save connected cluster enumerations for a single site on square lattice Ising models.
-Supports both periodic and open boundary conditions.
-Includes translational symmetry removal - only keeps one representative from each equivalence class.
+Only supports periodic boundary conditions with translation symmetry deduplication.
+Uses the same functions as generate_ising_clusters.jl for consistency.
 
 Usage:
-    julia generate_ising_clusters_one_site.jl --size 6 --weight 4 --site 1 --boundary periodic --prefix test
+    julia generate_ising_clusters_one_site.jl --size 6 --weight 4 --site 1 --prefix test
     julia generate_ising_clusters_one_site.jl --help
 """
 
@@ -19,68 +19,29 @@ include("functions/loop_enumeration_square.jl")
 using ArgParse
 using ProgressMeter
 
-# Import lattice creation functions
-function create_open_square_lattice(L::Int)
-    """Create square lattice adjacency matrix with open boundary conditions."""
-    N = L * L
-    adj_matrix = zeros(Int, N, N)
-    
-    function coord_to_idx(i::Int, j::Int)
-        return (i - 1) * L + j
-    end
-    
-    for i in 1:L
-        for j in 1:L
-            current = coord_to_idx(i, j)
-            
-            # Right neighbor (only if not at right edge)
-            if j < L
-                right = coord_to_idx(i, j + 1)
-                adj_matrix[current, right] = 1
-                adj_matrix[right, current] = 1
-            end
-            
-            # Down neighbor (only if not at bottom edge)
-            if i < L
-                down = coord_to_idx(i + 1, j)
-                adj_matrix[current, down] = 1
-                adj_matrix[down, current] = 1
-            end
-        end
-    end
-    
-    return adj_matrix
-end
-
-function create_square_lattice(L::Int, boundary::String)
-    """Create square lattice with specified boundary conditions."""
-    if boundary == "periodic"
-        return create_periodic_square_lattice(L)
-    elseif boundary == "open"
-        return create_open_square_lattice(L)
-    else
-        error("Unknown boundary condition: $boundary. Use 'periodic' or 'open'.")
-    end
-end
-
-# Helper function to estimate completion time
-function estimate_completion_time_one_site(L::Int, max_weight::Int)
-    """Provide rough time estimates based on lattice size and weight for single site."""
-    # Much faster than all-sites version
-    if L <= 6
-        return "< 5 seconds"
+# Import functions from generate_ising_clusters.jl
+function estimate_completion_time(L::Int, max_weight::Int)
+    """Provide rough time estimates based on lattice size and weight."""
+    if L <= 4
+        return "< 1 second"
+    elseif L <= 6
+        return "< 10 seconds" 
     elseif L <= 8
-        return "< 30 seconds"
+        return "10-60 seconds"
     elseif L <= 10
         return "1-5 minutes"
-    elseif L <= 12
-        return "5-15 minutes"
     else
-        return "15+ minutes (consider smaller parameters)"
+        return "5+ minutes (consider smaller parameters)"
     end
 end
 
-# Distance and translation functions for square lattices
+function calculate_center_site(L::Int)
+    """Calculate the center site index for an L×L lattice."""
+    center_i = (L + 1) ÷ 2
+    center_j = (L + 1) ÷ 2
+    return (center_i - 1) * L + center_j
+end
+
 function site_to_coords(site::Int, L::Int)
     """Convert 1-indexed site to (i, j) coordinates."""
     i = div(site - 1, L) + 1
@@ -93,49 +54,6 @@ function coords_to_site(i::Int, j::Int, L::Int)
     return (i - 1) * L + j
 end
 
-function manhattan_distance_periodic(site1::Int, site2::Int, L::Int)
-    """Calculate Manhattan distance between two sites on periodic lattice."""
-    i1, j1 = site_to_coords(site1, L)
-    i2, j2 = site_to_coords(site2, L)
-    
-    # Periodic distance in each dimension
-    di = min(abs(i2 - i1), L - abs(i2 - i1))
-    dj = min(abs(j2 - j1), L - abs(j2 - j1))
-    
-    return di + dj
-end
-
-function manhattan_distance_open(site1::Int, site2::Int, L::Int)
-    """Calculate Manhattan distance between two sites on open lattice."""
-    i1, j1 = site_to_coords(site1, L)
-    i2, j2 = site_to_coords(site2, L)
-    
-    return abs(i2 - i1) + abs(j2 - j1)
-end
-
-function manhattan_distance(site1::Int, site2::Int, L::Int, boundary::String)
-    """Calculate Manhattan distance with appropriate boundary conditions."""
-    if boundary == "periodic"
-        return manhattan_distance_periodic(site1, site2, L)
-    else
-        return manhattan_distance_open(site1, site2, L)
-    end
-end
-
-function sites_within_distance(target_site::Int, max_distance::Int, L::Int, boundary::String)
-    """Find all sites within Manhattan distance from target site."""
-    nearby_sites = Int[]
-    
-    for site in 1:(L*L)
-        if manhattan_distance(target_site, site, L, boundary) <= max_distance
-            push!(nearby_sites, site)
-        end
-    end
-    
-    return nearby_sites
-end
-
-# Translation functions for periodic lattices
 function translate_site(site::Int, di::Int, dj::Int, L::Int)
     """Translate a site by (di, dj) on an L×L periodic lattice."""
     i, j = site_to_coords(site, L)
@@ -147,159 +65,185 @@ function translate_site(site::Int, di::Int, dj::Int, L::Int)
     return coords_to_site(new_i, new_j, L)
 end
 
-function translate_cluster(cluster::Cluster, di::Int, dj::Int, L::Int, all_loops::Vector{Loop})
-    """Translate a cluster by (di, dj) and return the translated cluster."""
-    # Create mapping from old loop to translated loop
-    translated_loop_ids = Int[]
-    translated_multiplicities = Dict{Int, Int}()
+function translate_loop(loop::Loop, di::Int, dj::Int, L::Int)
+    """Translate a loop by (di, dj) and return the translated loop."""
+    # Translate all vertices in the loop
+    translated_vertices = [translate_site(v, di, dj, L) for v in loop.vertices]
+    translated_edges = [(translate_site(u, di, dj, L), translate_site(v, di, dj, L)) for (u, v) in loop.edges]
     
-    # For each loop in the cluster, find its translation
-    for (loop_id, multiplicity) in cluster.multiplicities
-        original_loop = all_loops[loop_id]
-        
-        # Translate all vertices in the loop
-        translated_vertices = [translate_site(v, di, dj, L) for v in original_loop.vertices]
-        translated_edges = [(translate_site(u, di, dj, L), translate_site(v, di, dj, L)) for (u, v) in original_loop.edges]
-        
-        # Create canonical representation and find matching loop
-        translated_loop = Loop(sort(translated_vertices), sort([(min(u,v), max(u,v)) for (u,v) in translated_edges]), original_loop.weight)
-        translated_canonical = canonical_loop_representation(translated_loop)
-        
-        # Find the corresponding loop ID in all_loops
-        translated_loop_id = -1
-        for (i, loop) in enumerate(all_loops)
-            if canonical_loop_representation(loop) == translated_canonical
-                translated_loop_id = i
-                break
-            end
-        end
-        
-        if translated_loop_id == -1
-            error("Could not find translated loop - this should not happen!")
-        end
-        
-        push!(translated_loop_ids, translated_loop_id)
-        translated_multiplicities[translated_loop_id] = multiplicity
-    end
-    
-    return Cluster(
-        sort(unique(translated_loop_ids)),
-        translated_multiplicities,
-        cluster.weight,
-        cluster.total_loops
-    )
+    # Create canonical representation
+    translated_loop = Loop(sort(translated_vertices), sort([(min(u,v), max(u,v)) for (u,v) in translated_edges]), loop.weight)
+    return translated_loop
 end
 
-function canonical_cluster_under_translation(cluster::Cluster, L::Int, all_loops::Vector{Loop})
-    """Find the canonical representative of a cluster under translation symmetry."""
-    canonical_cluster = cluster
-    canonical_signature = canonical_cluster_signature(cluster)
-    
-    # Try all possible translations
-    for di in 0:(L-1)
-        for dj in 0:(L-1)
-            if di == 0 && dj == 0
-                continue  # Skip identity translation
-            end
-            
-            translated_cluster = translate_cluster(cluster, di, dj, L, all_loops)
-            translated_signature = canonical_cluster_signature(translated_cluster)
-            
-            # Keep the lexicographically smallest signature
-            if translated_signature < canonical_signature
-                canonical_cluster = translated_cluster
-                canonical_signature = translated_signature
-            end
-        end
-    end
-    
-    return canonical_cluster
-end
-
-function remove_translational_redundancies(clusters::Vector{Cluster}, L::Int, all_loops::Vector{Loop})
-    """Remove clusters that are related by translation, keeping only canonical representatives."""
-    println("🔄 Removing translational redundancies...")
-    flush(stdout)
-    
-    unique_clusters = Cluster[]
-    seen_signatures = Set{Tuple}()
-    
-    progress = Progress(length(clusters), dt=0.1, desc="Removing redundancies: ", color=:orange, barlen=50)
-    
-    for cluster in clusters
-        # Find the canonical representative under translation
-        canonical_cluster = canonical_cluster_under_translation(cluster, L, all_loops)
-        canonical_signature = canonical_cluster_signature(canonical_cluster)
-        
-        if !(canonical_signature in seen_signatures)
-            push!(seen_signatures, canonical_signature)
-            push!(unique_clusters, canonical_cluster)
-        end
-        
-        next!(progress, showvalues = [("Unique", "$(length(unique_clusters))"), ("Total", "$(length(clusters))")])
-    end
-    
-    finish!(progress)
-    
-    println("  Original clusters: $(length(clusters))")
-    println("  Unique clusters (after translation): $(length(unique_clusters))")
-    println("  Redundancy factor: $(round(length(clusters) / length(unique_clusters), digits=2))x")
-    
-    return unique_clusters
-end
-
-# Optimized loop enumeration for single site
-function find_loops_within_distance(enumerator::ClusterEnumerator, target_site::Int, 
-                                   max_weight::Int, max_distance::Int, L::Int, boundary::String)
-    """Find all loops that contain vertices within max_distance of target_site."""
-    
-    println("  🎯 Optimizing: only considering vertices within distance $max_distance from site $target_site")
-    
-    # Find all sites within the distance constraint
-    nearby_sites = sites_within_distance(target_site, max_distance, L, boundary)
-    println("  Found $(length(nearby_sites)) sites within distance $max_distance (out of $(L*L) total)")
-    println("  Reduction factor: $(round(L*L / length(nearby_sites), digits=2))x fewer sites to consider")
-    
-    # Create a set for fast lookup
-    nearby_sites_set = Set(nearby_sites)
-    
+function generate_all_loops_pbc(center_loops::Vector{Loop}, L::Int)
+    """Generate all loops by translating center loops for periodic boundary conditions."""
     all_loops = Loop[]
     seen_loops = Set{Tuple{Vector{Int}, Vector{Tuple{Int,Int}}, Int}}()
     
-    # Create SquareLoopEnumerator for efficient enumeration
-    is_periodic = (boundary == "periodic")
-    square_enumerator = SquareLoopEnumerator(L; periodic=is_periodic)
+    println("  🔄 Generating all loops via translation (PBC)...")
+    total_translations = L * L
+    progress = Progress(total_translations, dt=0.1, desc="Translating loops: ", color=:green, barlen=50)
     
-    # Progress bar for loop enumeration over nearby sites only
-    progress = Progress(length(nearby_sites), dt=0.1, desc="Finding loops (optimized): ", color=:green, barlen=50)
-    
-    for vertex in nearby_sites
-        # Find loops supported on this vertex using new square enumeration
-        vertex_loops = find_loops_supported_on_vertex_square(square_enumerator, vertex, max_weight)
-        
-        for loop in vertex_loops
-            # Additional filter: only keep loops where ALL vertices are within our constraint
-            # This ensures we don't miss any loops that could be part of relevant clusters
-            if all(v in nearby_sites_set for v in loop.vertices)
-                # Only keep loops where 'vertex' is the smallest vertex (canonical representative)
-                if vertex == minimum(loop.vertices)
-                    canonical = canonical_loop_representation(loop)
-                    
-                    if !(canonical in seen_loops)
-                        push!(seen_loops, canonical)
-                        new_loop = Loop(sort(loop.vertices), sort(loop.edges), loop.weight)
-                        push!(all_loops, new_loop)
-                    end
+    for di in 0:(L-1)
+        for dj in 0:(L-1)
+            for loop in center_loops
+                translated_loop = translate_loop(loop, di, dj, L)
+                canonical = canonical_loop_representation(translated_loop)
+                
+                if !(canonical in seen_loops)
+                    push!(seen_loops, canonical)
+                    push!(all_loops, translated_loop)
                 end
             end
+            next!(progress, showvalues = [("Translation", "($di,$dj)"), ("Unique loops", "$(length(all_loops))")])
+        end
+    end
+    
+    finish!(progress)
+    println("  Generated $(length(all_loops)) unique loops from $(length(center_loops)) center loops")
+    
+    return all_loops
+end
+
+function create_coordinate_canonical_form(loop::Loop, L::Int = 11)
+    """
+    Create a true canonical form based on coordinate geometry.
+    This handles periodic boundary conditions properly for all pattern types.
+    """
+    # Convert vertices to coordinates
+    function site_to_coords(site::Int)
+        i = div(site - 1, L) + 1
+        j = mod(site - 1, L) + 1
+        return (i, j)
+    end
+    
+    coords = [site_to_coords(v) for v in sort(loop.vertices)]
+    
+    # Check for periodic wrapping by examining coordinate spans
+    i_values = [coord[1] for coord in coords]
+    j_values = [coord[2] for coord in coords]
+    
+    i_span = maximum(i_values) - minimum(i_values)
+    j_span = maximum(j_values) - minimum(j_values)
+    
+    # If span > L/2, the pattern likely wraps around periodic boundaries
+    if i_span > L/2 || j_span > L/2
+        # Unwrap coordinates by shifting wrapped vertices
+        unwrapped_coords = []
+        
+        for coord in coords
+            i, j = coord
+            # Unwrap i-coordinate if needed
+            if i_span > L/2
+                min_i = minimum(i_values)
+                if i - min_i > L/2
+                    i = i - L  # Shift back to represent wrapping
+                end
+            end
+            
+            # Unwrap j-coordinate if needed  
+            if j_span > L/2
+                min_j = minimum(j_values)
+                if j - min_j > L/2
+                    j = j - L  # Shift back to represent wrapping
+                end
+            end
+            
+            push!(unwrapped_coords, (i, j))
         end
         
-        next!(progress, showvalues = [("Vertex", "$(findfirst(==(vertex), nearby_sites))/$(length(nearby_sites))"), ("Loops found", "$(length(all_loops))")])  
+        coords = unwrapped_coords
+    end
+    
+    # Normalize coordinates to start from (0, 0)
+    min_i = minimum(coord[1] for coord in coords)
+    min_j = minimum(coord[2] for coord in coords)
+    
+    normalized_coords = [(coord[1] - min_i, coord[2] - min_j) for coord in coords]
+    normalized_coords = sort(normalized_coords)
+    
+    return (normalized_coords, loop.weight)
+end
+
+function create_translation_aware_cluster_signature(cluster::Cluster, all_loops::Vector{Loop}, L::Int)
+    """
+    Create cluster signature using translation-aware canonical loop forms.
+    This ensures clusters related by translation are identified as equivalent.
+    """
+    canonical_loop_sigs = []
+    for loop_id in cluster.loop_ids
+        loop = all_loops[loop_id]
+        # Create coordinate-based canonical form for translation equivalence
+        canonical_loop = create_coordinate_canonical_form(loop, L)
+        multiplicity = cluster.multiplicities[loop_id]
+        push!(canonical_loop_sigs, (canonical_loop, multiplicity))
+    end
+    
+    # Sort by canonical loop representation for consistent ordering
+    sort!(canonical_loop_sigs)
+    
+    return (tuple(canonical_loop_sigs...), cluster.weight)
+end
+
+function apply_translation_aware_deduplication(clusters::Vector{Cluster}, all_loops::Vector{Loop}, L::Int)
+    """
+    Remove clusters that are equivalent under translation symmetry.
+    Keep only one representative from each translation equivalence class.
+    """
+    
+    println("  🔍 Applying translation-aware deduplication...")
+    
+    # Group clusters by translation-aware canonical signature
+    canonical_groups = Dict{Tuple, Vector{Cluster}}()
+    
+    progress = Progress(length(clusters), dt=0.1, desc="  Creating canonical signatures: ", color=:yellow, barlen=40)
+    
+    for cluster in clusters
+        # Create translation-aware signature
+        canonical_sig = create_translation_aware_cluster_signature(cluster, all_loops, L)
+        
+        if !haskey(canonical_groups, canonical_sig)
+            canonical_groups[canonical_sig] = []
+        end
+        push!(canonical_groups[canonical_sig], cluster)
+        
+        next!(progress)
     end
     
     finish!(progress)
     
-    return all_loops
+    println("  📊 Found $(length(canonical_groups)) unique canonical cluster forms")
+    
+    # Keep only one representative from each equivalence class
+    deduplicated_clusters = Cluster[]
+    
+    dedup_progress = Progress(length(canonical_groups), dt=0.1, desc="  Selecting representatives: ", color=:yellow, barlen=40)
+    
+    total_duplicates_removed = 0
+    
+    for (canonical_sig, equivalent_clusters) in canonical_groups
+        # Keep the first cluster (they're all equivalent under translation)
+        representative_cluster = equivalent_clusters[1]
+        push!(deduplicated_clusters, representative_cluster)
+        
+        # Count duplicates removed
+        duplicates_removed = length(equivalent_clusters) - 1
+        total_duplicates_removed += duplicates_removed
+        
+        next!(dedup_progress)
+    end
+    
+    finish!(dedup_progress)
+    
+    println("  ✅ Translation-aware deduplication complete:")
+    println("    Original clusters: $(length(clusters))")
+    println("    Final clusters: $(length(deduplicated_clusters))") 
+    println("    Duplicates removed: $(total_duplicates_removed)")
+    println("    Unique canonical forms: $(length(canonical_groups))")
+    println("    Reduction factor: $(round(length(clusters) / length(deduplicated_clusters), digits=2))x")
+    
+    return deduplicated_clusters
 end
 
 # Data structure for single-site enumeration results
@@ -317,82 +261,52 @@ struct SingleSiteClusterData
     boundary_condition::String
     clusters_before_translation_removal::Int
     clusters_after_translation_removal::Int
+    canonical_forms_count::Int
 end
 
-function enumerate_clusters_one_site_with_translation_removal(enumerator::ClusterEnumerator, site::Int, 
-                                                           max_weight::Int, max_loop_weight::Int, L::Int, boundary::String)
-    """Enumerate clusters for one site and remove translational redundancies."""
-    
-    println("🚀 Starting single-site cluster enumeration...")
-    println("📋 Target site: $site")
-    println("📋 Max cluster weight: $max_weight")
-    println("📋 Max loop weight: $max_loop_weight")
-    println("📋 Distance constraint: $max_weight (Manhattan distance)")
-    println("📋 Boundary condition: $boundary")
-    println()
-    
-    start_time = time()
-    
-    # Step 1: Enumerate loops within distance constraint (OPTIMIZATION)
-    println("📊 Step 1: Enumerating loops within distance constraint...")
-    println("   🚀 OPTIMIZATION: Only considering loops near target site")
-    flush(stdout)
-    
-    # Use max_weight as the distance constraint since clusters can't extend beyond this
-    # max_distance for square lattice - use max_weight directly to be more inclusive
-    max_distance = max_weight
-    all_loops = find_loops_within_distance(enumerator, site, max_loop_weight, max_distance, L, boundary)
-    println("Found $(length(all_loops)) loops within distance $max_distance")
-    
-    # Step 2: Build interaction graph
-    println("\n🔗 Step 2: Building interaction graph...")
-    flush(stdout)
-    interaction_graph = build_interaction_graph_optimized(all_loops)
-    
-    # Step 3: Enumerate clusters for the target site
-    println("\n🌐 Step 3: Enumerating clusters for site $site...")
-    flush(stdout)
-    
-    # Find loops supported on target site
-    supported_loop_ids = Int[]
-    for (i, loop) in enumerate(all_loops)
-        if site in loop.vertices
-            push!(supported_loop_ids, i)
-        end
-    end
-    println("  Found $(length(supported_loop_ids)) loops supported on site $site")
-    
-    if isempty(supported_loop_ids)
-        println("  No loops found on site $site - returning empty results")
-        # Return consistent values: clusters_before_count, clusters_after_translation, clusters_after_count, enum_time, translation_time, all_loops
-        return 0, Cluster[], 0, 0.0, 0.0, all_loops
-    end
-    
-    # DFS cluster enumeration
-    site_clusters = dfs_enumerate_clusters_from_supported(all_loops, supported_loop_ids, 
-                                                        max_weight, interaction_graph)
-    
-    # Remove standard redundancies first
-    println("\n🧹 Step 4: Removing standard redundancies...")
-    unique_clusters = remove_cluster_redundancies(site_clusters)
-    clusters_before_translation = length(unique_clusters)
-    
-    enum_time = time() - start_time
-    
-    # Step 5: Remove translational redundancies (only for periodic boundary conditions)
-    println("\n🔄 Step 5: Removing translational redundancies...")
-    translation_start_time = time()
-    
-    # clusters_after_translation = remove_translational_redundancies(unique_clusters, L, all_loops)
-    clusters_after_translation = unique_clusters
-    clusters_after_count = length(clusters_after_translation)
+function parse_commandline()
+    s = ArgParseSettings(
+        description = "Generate connected clusters for single site on square lattice Ising model (periodic BC only)",
+        epilog = "Example: julia generate_ising_clusters_one_site.jl --size 6 --weight 4 --site 1"
+    )
 
+    @add_arg_table! s begin
+        "--size", "-L"
+            help = "Linear lattice size (L×L lattice)"
+            arg_type = Int
+            default = 6
+            
+        "--weight", "-w"
+            help = "Maximum cluster weight to enumerate"
+            arg_type = Int
+            default = 4
+            
+        "--site", "-s"
+            help = "Target site (1-indexed, default is center site)"
+            arg_type = Int
+            default = nothing
+            
+        "--loop-weight"
+            help = "Maximum individual loop weight (defaults to cluster weight)"
+            arg_type = Int
+            default = nothing
+            
+        "--prefix", "-p"
+            help = "Optional prefix for saved files"
+            arg_type = String
+            default = ""
+            
+        "--list"
+            help = "List existing saved cluster files and exit"
+            action = :store_true
+            
+        "--analyze"
+            help = "Analyze a saved cluster file"
+            arg_type = String
+            default = ""
+    end
 
-    
-    translation_time = time() - translation_start_time
-    
-    return clusters_before_translation, clusters_after_translation, clusters_after_count, 
-           enum_time, translation_time, all_loops
+    return parse_args(s)
 end
 
 function save_single_site_cluster_data(data::SingleSiteClusterData, prefix::String = "")
@@ -407,7 +321,7 @@ function save_single_site_cluster_data(data::SingleSiteClusterData, prefix::Stri
     
     # Generate filename
     timestamp = replace(data.timestamp, ":" => "-", "." => "-")
-    base_name = "single_site_clusters_L$(data.lattice_size)_site$(data.site)_w$(data.max_weight)_$(data.boundary_condition)_$(timestamp)"
+    base_name = "single_site_clusters_L$(data.lattice_size)_site$(data.site)_w$(data.max_weight)_periodic_$(timestamp)"
     if !isempty(prefix)
         base_name = "$(prefix)_$(base_name)"
     end
@@ -426,6 +340,7 @@ function save_single_site_cluster_data(data::SingleSiteClusterData, prefix::Stri
         "total_loops" => length(data.all_loops),
         "clusters_before_translation_removal" => data.clusters_before_translation_removal,
         "clusters_after_translation_removal" => data.clusters_after_translation_removal,
+        "canonical_forms_count" => data.canonical_forms_count,
         "redundancy_factor" => data.clusters_before_translation_removal / max(1, data.clusters_after_translation_removal),
         "enumeration_time_seconds" => data.enumeration_time,
         "translation_removal_time_seconds" => data.translation_removal_time,
@@ -449,60 +364,10 @@ function save_single_site_cluster_data(data::SingleSiteClusterData, prefix::Stri
     return filepath
 end
 
-function parse_commandline()
-    s = ArgParseSettings(
-        description = "Generate connected clusters for single site on square lattice Ising model",
-        epilog = "Example: julia generate_ising_clusters_one_site.jl --size 6 --weight 4 --site 1 --boundary periodic"
-    )
-
-    @add_arg_table! s begin
-        "--size", "-L"
-            help = "Linear lattice size (L×L lattice)"
-            arg_type = Int
-            default = 6
-            
-        "--weight", "-w"
-            help = "Maximum cluster weight to enumerate"
-            arg_type = Int
-            default = 4
-            
-        "--site", "-s"
-            help = "Target site (1-indexed)"
-            arg_type = Int
-            default = 1
-            
-        "--loop-weight"
-            help = "Maximum individual loop weight (defaults to cluster weight)"
-            arg_type = Int
-            default = nothing
-            
-        "--boundary", "-b"
-            help = "Boundary conditions: 'periodic' or 'open'"
-            arg_type = String
-            default = "periodic"
-            
-        "--prefix", "-p"
-            help = "Optional prefix for saved files"
-            arg_type = String
-            default = ""
-            
-        "--list"
-            help = "List existing saved cluster files and exit"
-            action = :store_true
-            
-        "--analyze"
-            help = "Analyze a saved cluster file"
-            arg_type = String
-            default = ""
-    end
-
-    return parse_args(s)
-end
-
 function main()
     args = parse_commandline()
     
-    println("🎯 Single-Site Ising Cluster Generator")
+    println("🎯 Single-Site Ising Cluster Generator (Translation-Aware)")
     println("="^50)
     
     # Handle special actions
@@ -540,10 +405,10 @@ function main()
     # Extract parameters
     L = args["size"]
     max_weight = args["weight"]
-    site = args["site"]
-    boundary = args["boundary"]
+    site = something(args["site"], calculate_center_site(L))
     prefix = args["prefix"]
     max_loop_weight = something(args["loop-weight"], max_weight)
+    boundary = "periodic"  # Only periodic boundary conditions supported
     
     # Validate parameters
     if L < 2
@@ -561,16 +426,11 @@ function main()
         return
     end
     
-    if !(boundary in ["periodic", "open"])
-        println("❌ Error: Boundary must be 'periodic' or 'open'")
-        return
-    end
-    
     # Display parameters with time estimate
     println("📋 Parameters:")
     println("  Lattice size: $(L)×$(L) (L^2 = $(L*L) sites)")
-    println("  Target site: $site")
-    println("  Boundary conditions: $boundary")
+    println("  Target site: $site (coordinates $(site_to_coords(site, L)))")
+    println("  Boundary conditions: $boundary (only supported option)")
     println("  Max cluster weight: $max_weight")
     println("  Max loop weight: $max_loop_weight")
     if !isempty(prefix)
@@ -578,58 +438,116 @@ function main()
     end
     
     # Add time estimate
-    time_estimate = estimate_completion_time_one_site(L, max_weight)
+    time_estimate = estimate_completion_time(L, max_weight)
     println("  ⏱️  Estimated time: $time_estimate")
-    
-    if boundary == "periodic"
-        println("  🔄 Translation symmetries will be removed")
-    else
-        println("  ⚠️  Open boundaries: translation removal not applicable")
-    end
-    
-    # Show optimization info
-    total_sites = L * L
-    max_distance = max_weight
-    nearby_sites_count = length(sites_within_distance(site, max_distance, L, boundary))
-    optimization_factor = round(total_sites / nearby_sites_count, digits=2)
-    
-    println("  🎯 OPTIMIZATION INFO:")
-    println("    Distance constraint: $max_distance (based on max weight)")
-    println("    Sites within constraint: $nearby_sites_count / $total_sites")
-    println("    Expected speedup: ~$(optimization_factor)x faster loop enumeration")
+    println("  🔄 Translation symmetries will be identified and deduplicated")
     println()
     
-    # Create lattice with progress
-    println("🏗️  Creating $(L)×$(L) square lattice with $boundary boundary conditions...")
-    lattice_progress = Progress(3, dt=0.5, desc="Setting up lattice: ", color=:blue)
-    
-    next!(lattice_progress, showvalues = [("Step", "Creating adjacency matrix")])
-    adj_matrix = create_square_lattice(L, boundary)
-    
-    next!(lattice_progress, showvalues = [("Step", "Initializing enumerator")])
-    enumerator = ClusterEnumerator(adj_matrix)
-    
-    next!(lattice_progress, showvalues = [("Step", "Lattice setup complete")])
-    finish!(lattice_progress)
-    
     # Add boundary condition to prefix
-    full_prefix = isempty(prefix) ? boundary : "$(prefix)_$(boundary)"
+    full_prefix = isempty(prefix) ? "periodic" : "$(prefix)_periodic"
+    
+    # Generate clusters using the same optimized approach as generate_ising_clusters.jl
+    println("🚀 Starting single-site cluster enumeration...")
+    println("📊 This will involve 5 main steps:")
+    println("   1️⃣  Center site loop generation")
+    println("   2️⃣  Loop translation and expansion")
+    println("   3️⃣  Cluster enumeration for target site")
+    println("   4️⃣  Translation-aware deduplication")
+    println("   5️⃣  Data saving and analysis")
+    println()
     
     start_time = time()
     
     try
-        # Enumerate clusters for the single site
-        clusters_before_count, clusters_after_translation, clusters_after_count, 
-        enum_time, translation_time, all_loops = enumerate_clusters_one_site_with_translation_removal(
-            enumerator, site, max_weight, max_loop_weight, L, boundary)
+        # Step 1: Generate loops supported on center site
+        center_site = calculate_center_site(L)
+        center_coords = site_to_coords(center_site, L)
+        println("📍 Step 1: Generating loops on center site $center_site (coordinates $center_coords)...")
         
+        # Use SquareLoopEnumerator for optimized performance
+        enumerator_square = SquareLoopEnumerator(L; periodic=true)
+        center_loops = find_loops_supported_on_vertex_square(enumerator_square, center_site, max_loop_weight)
+        
+        println("  Found $(length(center_loops)) loops supported on center site")
+        
+        # Step 2: Generate all loops via translation
+        println("\n🔄 Step 2: Generating all loops via translation...")
+        all_loops = generate_all_loops_pbc(center_loops, L)
+        
+        # Step 3: Build interaction graph and enumerate clusters for target site
+        println("\n🔗 Step 3: Building interaction graph and enumerating clusters for site $site...")
+        interaction_graph = build_interaction_graph_optimized(all_loops)
+        
+        # Find loops supported on target site
+        supported_loop_ids = Int[]
+        for (i, loop) in enumerate(all_loops)
+            if site in loop.vertices
+                push!(supported_loop_ids, i)
+            end
+        end
+        
+        println("  Found $(length(supported_loop_ids)) loops supported on site $site")
+        
+        if isempty(supported_loop_ids)
+            println("  No loops found on site $site - returning empty results")
+            
+            # Create empty data structure
+            data = SingleSiteClusterData(
+                Cluster[],
+                all_loops,
+                enumerator_square.base_enumerator.adj_matrix,
+                max_weight,
+                L,
+                site,
+                0.0,
+                0.0,
+                string(now()),
+                boundary,
+                0,
+                0,
+                0
+            )
+            
+            save_single_site_cluster_data(data, full_prefix)
+            println("\n✅ Empty enumeration completed!")
+            return
+        end
+        
+        # DFS cluster enumeration
+        site_clusters = dfs_enumerate_clusters_from_supported(all_loops, supported_loop_ids, 
+                                                            max_weight, interaction_graph)
+        
+        # Remove standard redundancies first
+        unique_clusters = remove_cluster_redundancies(site_clusters)
+        clusters_before_translation = length(unique_clusters)
+        
+        enum_time = time() - start_time
+        
+        # Step 4: Apply translation-aware deduplication
+        println("\n🔧 Step 4: Translation-aware deduplication...")
+        translation_start_time = time()
+        
+        clusters_after_translation = apply_translation_aware_deduplication(unique_clusters, all_loops, L)
+        clusters_after_count = length(clusters_after_translation)
+        
+        # Count unique canonical forms
+        canonical_forms = Set{Tuple}()
+        for cluster in clusters_after_translation
+            canonical_sig = create_translation_aware_cluster_signature(cluster, all_loops, L)
+            push!(canonical_forms, canonical_sig)
+        end
+        canonical_forms_count = length(canonical_forms)
+        
+        translation_time = time() - translation_start_time
+        
+        # Step 5: Create data structure and save
+        println("\n💾 Step 5: Creating data structure and saving...")
         total_time = time() - start_time
         
-        # Create data structure
         data = SingleSiteClusterData(
             clusters_after_translation,
             all_loops,
-            adj_matrix,
+            enumerator_square.base_enumerator.adj_matrix,
             max_weight,
             L,
             site,
@@ -637,24 +555,30 @@ function main()
             translation_time,
             string(now()),
             boundary,
-            clusters_before_count,
-            clusters_after_count
+            clusters_before_translation,
+            clusters_after_count,
+            canonical_forms_count
         )
         
         # Save results
         filepath = save_single_site_cluster_data(data, full_prefix)
         
+        println("\n✅ Single-site enumeration completed!")
+        
         # Success summary
         println("\n🎉 SUCCESS!")
         println("="^40)
-        println("✅ Single-site enumeration completed in $(round(total_time, digits=2)) seconds")
-        println("✅ Clusters before translation removal: $clusters_before_count")
+        println("✅ Enumeration completed in $(round(total_time, digits=2)) seconds")
+        println("✅ Clusters before translation removal: $clusters_before_translation")
         println("✅ Clusters after translation removal: $clusters_after_count")
-        if clusters_before_count > 0
-            reduction_factor = round(clusters_before_count / max(1, clusters_after_count), digits=2)
-            println("✅ Redundancy reduction factor: $(reduction_factor)x")
+        println("✅ Unique canonical forms: $canonical_forms_count")
+        if clusters_before_translation > 0
+            reduction_factor = round(clusters_before_translation / max(1, clusters_after_count), digits=2)
+            println("✅ Translation redundancy factor: $(reduction_factor)x")
         end
         println("✅ Data saved successfully!")
+        
+        # Show file location
         println("📁 Saved to: $(basename(filepath))")
         
         # Quick analysis
@@ -666,7 +590,7 @@ function main()
         
         for weight in sort(collect(keys(by_weight)))
             count = by_weight[weight]
-            println("  Weight $weight: $count unique clusters")
+            println("  Weight $weight: $count unique clusters (translation-inequivalent)")
         end
         
     catch e
@@ -686,17 +610,18 @@ function main()
     println("  • Use --list to see all saved files")
     println("  • Use --analyze <filename> to analyze results")
     println("  • Compare with all-sites enumeration using generate_ising_clusters.jl")
+    println("  • Note: Only unique clusters under translation symmetry are saved")
 end
 
 function show_examples()
     """Show usage examples."""
     println("📚 EXAMPLES:")
     println()
-    println("1. Generate clusters for site 1 on 4×4 periodic lattice, max weight 3:")
-    println("   julia generate_ising_clusters_one_site.jl --size 4 --site 1 --weight 3 --boundary periodic")
+    println("1. Generate clusters for center site on 4×4 periodic lattice, max weight 3:")
+    println("   julia generate_ising_clusters_one_site.jl --size 4 --weight 3")
     println()
-    println("2. Generate clusters for site 10 on 6×6 open lattice with custom prefix:")
-    println("   julia generate_ising_clusters_one_site.jl -L 6 -s 10 -w 5 -b open -p my_test")
+    println("2. Generate clusters for site 10 on 6×6 lattice with custom prefix:")
+    println("   julia generate_ising_clusters_one_site.jl -L 6 -s 10 -w 5 -p my_test")
     println()
     println("3. List all saved cluster files:")
     println("   julia generate_ising_clusters_one_site.jl --list")
