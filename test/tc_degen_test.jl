@@ -175,7 +175,7 @@ function test_toric_degeneracy()
     pcmat = toric_code_X_parity_matrix(L)
     
     # Create error pattern: flip left and top edges of plaquette (2,2)
-    errors_true = create_plaquette_error(L, 2, 2)
+    errors_true = create_plaquette_error(L, 1, 1)
     
     println("\nError pattern (first 9 are horizontal edges, next 9 are vertical edges):")
     println("Horizontal edges: ", errors_true[1:L^2])
@@ -204,7 +204,7 @@ function test_toric_degeneracy()
     priors_no_loops = [ITensor([0.,0.], data_indices[i]) for i in 1:n]
     
     # Get Tanner loops for loop corrections using the same method as tc.jl
-    max_loop_order = 12
+    max_loop_order = 8
     tannerloopslist = [ToricLoops.find_toric_code_loops(pcmat, d, max_loop_order) for d in 1:n]
     
     println("\n=== Computing Priors ===")

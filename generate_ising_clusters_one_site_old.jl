@@ -14,7 +14,6 @@ Usage:
 
 include("dependencies.jl")
 include("functions/ClusterEnumeration.jl")
-include("functions/loop_enumeration_square.jl")
 
 using ArgParse
 using ProgressMeter
@@ -266,16 +265,12 @@ function find_loops_within_distance(enumerator::ClusterEnumerator, target_site::
     all_loops = Loop[]
     seen_loops = Set{Tuple{Vector{Int}, Vector{Tuple{Int,Int}}, Int}}()
     
-    # Create SquareLoopEnumerator for efficient enumeration
-    is_periodic = (boundary == "periodic")
-    square_enumerator = SquareLoopEnumerator(L; periodic=is_periodic)
-    
     # Progress bar for loop enumeration over nearby sites only
     progress = Progress(length(nearby_sites), dt=0.1, desc="Finding loops (optimized): ", color=:green, barlen=50)
     
     for vertex in nearby_sites
-        # Find loops supported on this vertex using new square enumeration
-        vertex_loops = find_loops_supported_on_vertex_square(square_enumerator, vertex, max_weight)
+        # Find loops supported on this vertex
+        vertex_loops = find_loops_supported_on_vertex_bfs(enumerator.loop_enumerator, vertex, max_weight)
         
         for loop in vertex_loops
             # Additional filter: only keep loops where ALL vertices are within our constraint
@@ -339,8 +334,8 @@ function enumerate_clusters_one_site_with_translation_removal(enumerator::Cluste
     flush(stdout)
     
     # Use max_weight as the distance constraint since clusters can't extend beyond this
-    # max_distance for square lattice - use max_weight directly to be more inclusive
-    max_distance = max_weight
+    # max_distance for square lattice
+    max_distance = ceil(Int, (max_weight) / 2)
     all_loops = find_loops_within_distance(enumerator, site, max_loop_weight, max_distance, L, boundary)
     println("Found $(length(all_loops)) loops within distance $max_distance")
     

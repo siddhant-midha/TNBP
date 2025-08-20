@@ -473,6 +473,91 @@ function canonical_cluster_signature(cluster::Cluster)
     return (tuple(items...), cluster.weight)
 end
 
+function create_coordinate_canonical_form_for_cluster(loop::Loop, L::Int = 11)
+    """
+    Create a true canonical form based on coordinate geometry for cluster identification.
+    This handles periodic boundary conditions properly for translation symmetry tests.
+    """
+    # Convert vertices to coordinates
+    function site_to_coords(site::Int)
+        i = div(site - 1, L) + 1
+        j = mod(site - 1, L) + 1
+        return (i, j)
+    end
+    
+    coords = [site_to_coords(v) for v in sort(loop.vertices)]
+    
+    # Check for periodic wrapping by examining coordinate spans
+    i_values = [coord[1] for coord in coords]
+    j_values = [coord[2] for coord in coords]
+    
+    i_span = maximum(i_values) - minimum(i_values)
+    j_span = maximum(j_values) - minimum(j_values)
+    
+    # If span > L/2, the pattern likely wraps around periodic boundaries
+    # We need to "unwrap" it to get the true geometric pattern
+    if i_span > L/2 || j_span > L/2
+        # Unwrap coordinates by shifting wrapped vertices
+        unwrapped_coords = []
+        
+        for coord in coords
+            i, j = coord
+            # Unwrap i-coordinate if needed
+            if i_span > L/2
+                # Find vertices that are "far" from the minimum i
+                min_i = minimum(i_values)
+                if i - min_i > L/2
+                    i = i - L  # Shift back to represent wrapping
+                end
+            end
+            
+            # Unwrap j-coordinate if needed  
+            if j_span > L/2
+                # Find vertices that are "far" from the minimum j
+                min_j = minimum(j_values)
+                if j - min_j > L/2
+                    j = j - L  # Shift back to represent wrapping
+                end
+            end
+            
+            push!(unwrapped_coords, (i, j))
+        end
+        
+        coords = unwrapped_coords
+    end
+    
+    # Normalize coordinates to start from (0, 0)
+    min_i = minimum(coord[1] for coord in coords)
+    min_j = minimum(coord[2] for coord in coords)
+    
+    normalized_coords = [(coord[1] - min_i, coord[2] - min_j) for coord in coords]
+    
+    # Sort for canonical ordering
+    normalized_coords = sort(normalized_coords)
+    
+    return (normalized_coords, loop.weight)
+end
+
+function translation_aware_cluster_signature(cluster::Cluster, all_loops::Vector{Loop}, L::Int = 11)
+    """
+    Create cluster signature using translation-aware canonical loop representations.
+    This properly identifies clusters that are translations of each other.
+    """
+    canonical_loop_sigs = []
+    for loop_id in cluster.loop_ids
+        loop = all_loops[loop_id]
+        # Create proper coordinate-based canonical form
+        canonical_loop = create_coordinate_canonical_form_for_cluster(loop, L)
+        multiplicity = cluster.multiplicities[loop_id]
+        push!(canonical_loop_sigs, (canonical_loop, multiplicity))
+    end
+    
+    # Sort by canonical loop representation for consistent ordering
+    sort!(canonical_loop_sigs)
+    
+    return (tuple(canonical_loop_sigs...), cluster.weight)
+end
+
 function ursell_function(cluster::Cluster, all_loops::Vector{Loop})
     """
     Compute the Ursell function φ(W) for a given cluster W.

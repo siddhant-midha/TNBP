@@ -9,40 +9,10 @@ Focused test for finding and validating two-loop clusters with weights (4,4) and
 # Include necessary modules
 include("../dependencies.jl")
 include("../functions/ClusterEnumeration.jl")
+include("test_utils.jl")
 
 using Test
 using Serialization
-
-function load_latest_cluster_file()
-    """Load the most recent cluster enumeration file."""
-    save_dir = "saved_clusters"
-    
-    if !isdir(save_dir)
-        error("No saved_clusters directory found!")
-    end
-    
-    # Look for files matching our criteria (weight 10, size 11, PBC)
-    files = readdir(save_dir)
-    
-    # Filter for L11_w10 PBC files
-    matching_files = filter(f -> contains(f, "L11") && contains(f, "w10") && contains(f, "periodic") && endswith(f, ".jld2"), files)
-    
-    if isempty(matching_files)
-        error("No matching cluster files found for L=11, w=10, PBC!")
-    end
-    
-    # Sort by timestamp and take the most recent
-    latest_file = sort(matching_files)[end]
-    filepath = joinpath(save_dir, latest_file)
-    
-    println("📖 Loading cluster data from: $(latest_file)")
-    
-    loaded_data = open(filepath, "r") do io
-        deserialize(io)
-    end
-    
-    return loaded_data["data"]
-end
 
 function count_shared_vertices(loop1::Loop, loop2::Loop)
     """Count the number of shared vertices between two loops."""
@@ -59,7 +29,7 @@ function analyze_two_loop_clusters()
     # Load data
     local data
     try
-        data = load_latest_cluster_file()
+        data, filename = load_latest_L11_w10_file()
         println("✅ Successfully loaded data")
         
         # Print summary
@@ -97,15 +67,12 @@ function analyze_two_loop_clusters()
     invalid_weight_count = 0
     invalid_vertex_count = 0
     
-    println("\n🔍 Analyzing weight patterns and vertex sharing...")
+    println("\n🔍 Analyzing weight patterns and vertex sharing for ALL two-loop clusters...")
     
-    # Sample analysis - look at first 20 clusters in detail
-    sample_size = min(20, length(two_loop_clusters))
-    println("\\n📋 Detailed analysis of first $sample_size clusters:")
+    # Full analysis of ALL clusters with detailed output for first 20
+    println("\\n📋 Detailed analysis of first 20 clusters:")
     
-    for i in 1:sample_size
-        site, cluster = two_loop_clusters[i]
-        
+    for (i, (site, cluster)) in enumerate(two_loop_clusters)
         # Get loop weights
         weights = [data.all_loops[id].weight for id in cluster.loop_ids]
         sort!(weights)
@@ -121,7 +88,7 @@ function analyze_two_loop_clusters()
         # Count vertex sharing patterns
         vertex_sharing_counts[shared] = get(vertex_sharing_counts, shared, 0) + 1
         
-        # Validation
+        # Validation for ALL clusters
         weight_valid = (weights == [4, 4] || weights == [4, 6])
         vertex_valid = (shared in [1, 2, 4])
         
@@ -137,8 +104,8 @@ function analyze_two_loop_clusters()
             invalid_vertex_count += 1
         end
         
-        # Detailed output for first few
-        if i <= 10
+        # Detailed output for first 20 only
+        if i <= 20
             status_weight = weight_valid ? "✅" : "❌"
             status_vertex = vertex_valid ? "✅" : "❌"
             
@@ -152,24 +119,8 @@ function analyze_two_loop_clusters()
         end
     end
     
-    # Full analysis of all clusters
-    println("\\n📊 Full analysis of all $(length(two_loop_clusters)) two-loop clusters...")
-    
-    for (site, cluster) in two_loop_clusters
-        # Get loop weights
-        weights = [data.all_loops[id].weight for id in cluster.loop_ids]
-        sort!(weights)
-        
-        # Count weight patterns
-        weight_patterns[weights] = get(weight_patterns, weights, 0) + 1
-        
-        # Get loops and count shared vertices
-        loop1 = data.all_loops[cluster.loop_ids[1]]
-        loop2 = data.all_loops[cluster.loop_ids[2]]
-        shared = count_shared_vertices(loop1, loop2)
-        
-        # Count vertex sharing patterns
-        vertex_sharing_counts[shared] = get(vertex_sharing_counts, shared, 0) + 1
+    if length(two_loop_clusters) > 20
+        println("\\n📊 ... analyzed all $(length(two_loop_clusters)) two-loop clusters (showed details for first 20)")
     end
     
     # Summary statistics

@@ -10,40 +10,10 @@ Tests key properties without the full translation symmetry check.
 # Include necessary modules
 include("../dependencies.jl")
 include("../functions/ClusterEnumeration.jl")
+include("test_utils.jl")
 
 using Test
 using Serialization
-
-function load_latest_cluster_file()
-    """Load the most recent cluster enumeration file."""
-    save_dir = "saved_clusters"
-    
-    if !isdir(save_dir)
-        error("No saved_clusters directory found!")
-    end
-    
-    # Look for files matching our criteria (weight 10, size 11, PBC)
-    files = readdir(save_dir)
-    
-    # Filter for L11_w10 PBC files
-    matching_files = filter(f -> contains(f, "L11") && contains(f, "w10") && contains(f, "periodic") && endswith(f, ".jld2"), files)
-    
-    if isempty(matching_files)
-        error("No matching cluster files found for L=11, w=10, PBC!")
-    end
-    
-    # Sort by timestamp and take the most recent
-    latest_file = sort(matching_files)[end]
-    filepath = joinpath(save_dir, latest_file)
-    
-    println("📖 Loading cluster data from: $(latest_file)")
-    
-    loaded_data = open(filepath, "r") do io
-        deserialize(io)
-    end
-    
-    return loaded_data["data"]
-end
 
 function count_shared_vertices(loop1::Loop, loop2::Loop)
     """Count the number of shared vertices between two loops."""
@@ -60,7 +30,7 @@ function run_basic_validation()
     # Load data
     local data
     try
-        data = load_latest_cluster_file()
+        data, filename = load_latest_L11_w10_file()
         println("✅ Successfully loaded data")
         
         # Print summary
@@ -73,82 +43,104 @@ function run_basic_validation()
         return false
     end
     
-    # Test 1: Multiplicity constraints
-    println("\n🔍 Test 1: Checking multiplicity constraints...")
+    # Test 1: Multiplicity constraints - TEST ALL CLUSTERS
+    println("\n🔍 Test 1: Checking multiplicity constraints (ALL clusters)...")
     mult_violations = 0
     mult2_count = 0
-    sample_clusters = []
+    mult2_clusters = []
+    total_clusters_checked = 0
     
     for (site, clusters) in data.clusters_by_site
         for cluster in clusters
+            total_clusters_checked += 1
+            
             # Check multiplicity ≤ 2
             max_mult = maximum(values(cluster.multiplicities))
             if max_mult > 2
                 mult_violations += 1
-                if mult_violations <= 3
+                if mult_violations <= 10  # Show first 10 violations
                     println("  ❌ Site $site: multiplicity $max_mult")
                 end
             end
             
-            # Count multiplicity=2 clusters for further analysis
+            # Collect ALL multiplicity=2 clusters for analysis
             if any(mult == 2 for mult in values(cluster.multiplicities))
                 mult2_count += 1
-                if length(sample_clusters) < 10
-                    push!(sample_clusters, (site, cluster))
-                end
+                push!(mult2_clusters, (site, cluster))
             end
-        end
-        
-        if mult_violations > 10  # Early exit to avoid too much output
-            break
         end
     end
     
+    println("  📊 Total clusters checked: $total_clusters_checked")
     println("  📊 Multiplicity violations: $mult_violations")
     println("  📊 Clusters with multiplicity=2: $mult2_count")
     
-    # Test 2: Sample analysis of multiplicity=2 clusters
-    println("\n🔍 Test 2: Analyzing sample multiplicity=2 clusters...")
+    # Test 2: Complete analysis of ALL multiplicity=2 clusters
+    println("\n🔍 Test 2: Analyzing ALL multiplicity=2 clusters...")
     weight_violations = 0
     vertex_violations = 0
     
-    for (site, cluster) in sample_clusters[1:min(5, length(sample_clusters))]
-        println("  📍 Site $site cluster:")
-        println("    Loop IDs: $(cluster.loop_ids)")
-        println("    Multiplicities: $(cluster.multiplicities)")
+    # Analyze ALL multiplicity=2 clusters, but show details for only first 5
+    for (idx, (site, cluster)) in enumerate(mult2_clusters)
+        show_details = (idx <= 5)  # Show details for first 5 only
         
-        # Check loop weights
+        if show_details
+            println("  📍 Site $site cluster:")
+            println("    Loop IDs: $(cluster.loop_ids)")
+            println("    Multiplicities: $(cluster.multiplicities)")
+        end
+        
+        # Check loop weights for ALL clusters
         if length(cluster.loop_ids) == 1
             # Single loop with multiplicity 2
             loop_weight = data.all_loops[cluster.loop_ids[1]].weight
-            println("    Single loop weight: $loop_weight")
+            if show_details
+                println("    Single loop weight: $loop_weight")
+            end
             if loop_weight != 4
                 weight_violations += 1
-                println("    ❌ Expected weight 4, got $loop_weight")
+                if show_details
+                    println("    ❌ Expected weight 4, got $loop_weight")
+                end
             end
         elseif length(cluster.loop_ids) == 2
             # Two different loops
             weights = [data.all_loops[id].weight for id in cluster.loop_ids]
             sort!(weights)
-            println("    Two loop weights: $weights")
+            if show_details
+                println("    Two loop weights: $weights")
+            end
             
             if !(weights == [4, 4] || weights == [4, 6])
                 weight_violations += 1
-                println("    ❌ Expected [4,4] or [4,6], got $weights")
+                if show_details
+                    println("    ❌ Expected [4,4] or [4,6], got $weights")
+                end
             end
             
-            # Check vertex sharing
+            # Check vertex sharing for ALL clusters
             loop1 = data.all_loops[cluster.loop_ids[1]]
             loop2 = data.all_loops[cluster.loop_ids[2]]
             shared = count_shared_vertices(loop1, loop2)
-            println("    Shared vertices: $shared")
+            if show_details
+                println("    Shared vertices: $shared")
+            end
             
             if !(shared in [1, 2, 4])
                 vertex_violations += 1
-                println("    ❌ Expected 1, 2, or 4 shared vertices, got $shared")
+                if show_details
+                    println("    ❌ Expected 1, 2, or 4 shared vertices, got $shared")
+                end
             end
         end
-        println()
+        
+        if show_details
+            println()
+        end
+    end
+    
+    if mult2_count > 5
+        println("  📊 ... analyzed all $mult2_count multiplicity=2 clusters (showed details for first 5)")
     end
     
     # Test 3: Translation symmetry sample check
