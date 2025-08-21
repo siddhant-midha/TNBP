@@ -172,7 +172,7 @@ function cluster_expansion_2d_ising_with_single_site_clusters(L::Int, β::Float6
     
     # Step 3: Compute BP fixed point
     println("\nStep 3: Computing BP fixed point...")
-    messages = BP.get_messages(T, edges, links)
+    messages = BP.get_messages(T, edges, links;random_part=0.01)
     messages = BP.message_passing(T, messages, edges, adj_mat; max_iters=1000)
     println("✅ BP converged")
     
@@ -485,7 +485,7 @@ function cluster_expansion_2d_ising_with_saved_clusters(cluster_file::String, L:
     
     # Step 2: Compute BP fixed point
     println("\nStep 2: Computing BP fixed point...")
-    messages = BP.get_messages(T, edges, links)
+    messages = BP.get_messages(T, edges, links;random_part=0.01)
     messages = BP.message_passing(T, messages, edges, adj_mat; max_iters=1000)
     println("✅ BP converged")
     
@@ -718,7 +718,7 @@ function plot_free_energy_vs_beta_with_saved_clusters(cluster_file::String, β_r
             T = Ising2D.get_ising_tn(L, β; h=0.0)
             N = L^2
             adj_mat, edges, links = BP.get_adj_mat(T)
-            messages = BP.get_messages(T, edges, links)
+            messages = BP.get_messages(T, edges, links;random_part=0.01)
             messages = BP.message_passing(T, messages, edges, adj_mat; max_iters=1000)
             Z_bp_full = BP.mean_free_partition_fn(1:N, T, messages, adj_mat)
             
@@ -844,17 +844,20 @@ function plot_free_energy_vs_beta_with_single_site_clusters_efficient(L::Int, β
             T = Ising2D.get_ising_tn(L, β; h=0.0)
             N = L^2
             adj_mat, edges, links = BP.get_adj_mat(T)
-            messages = BP.get_messages(T, edges, links)
+            messages = BP.get_messages(T, edges, links;random_part=0.03)
             messages = BP.message_passing(T, messages, edges, adj_mat; max_iters=1000)
             
+            Z_l = BP.get_fixed_point_list(T, messages, adj_mat)
+            log_Z_sum = sum(log.(real.(Z_l)))
+
             # Get BP free energy density
             Z_bp_full = BP.mean_free_partition_fn(1:N, T, messages, adj_mat)
             bp_log_Z = log(Z_bp_full)
-            f_bp = -real(bp_log_Z) / (2 * N)
+            f_bp = - log_Z_sum / (2 * L^2)
             push!(bp_f, f_bp)
             
             # Normalize tensors
-            Z_l = BP.get_fixed_point_list(T, messages, adj_mat)
+            
             T_normalized = BP.normalize_tensors(T, Z_l)
             
             # Compute ALL cluster contributions once for this β
@@ -939,7 +942,7 @@ function plot_free_energy_vs_beta_with_single_site_clusters(L::Int, β_range::Ve
             T = Ising2D.get_ising_tn(L, β; h=0.0)
             N = L^2
             adj_mat, edges, links = BP.get_adj_mat(T)
-            messages = BP.get_messages(T, edges, links)
+            messages = BP.get_messages(T, edges, links;random_part=0.01)
             messages = BP.message_passing(T, messages, edges, adj_mat; max_iters=1000)
             Z_bp_full = BP.mean_free_partition_fn(1:N, T, messages, adj_mat)
             
