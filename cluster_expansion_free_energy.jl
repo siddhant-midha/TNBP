@@ -98,16 +98,29 @@ function load_latest_single_site_cluster_file(; size_filter="L11", weight_filter
     end
     
     # Sort by filename (which includes timestamp) and take the most recent
-    latest_file = sort(matching_files)[end]
-    filepath = joinpath(save_dir, latest_file)
+    sorted_files = sort(matching_files, rev=true)  # Most recent first
     
-    println("📖 Loading latest single-site cluster data: $(latest_file)")
-    
-    loaded_data = open(filepath, "r") do io
-        deserialize(io)
+    # Try to load files starting with the most recent
+    for latest_file in sorted_files
+        filepath = joinpath(save_dir, latest_file)
+        
+        println("📖 Attempting to load single-site cluster data: $(latest_file)")
+        
+        try
+            loaded_data = open(filepath, "r") do io
+                deserialize(io)
+            end
+            
+            println("✅ Successfully loaded: $(latest_file)")
+            return loaded_data["data"], latest_file
+        catch e
+            println("⚠️  Failed to load $(latest_file): $e")
+            if latest_file == sorted_files[end]  # If this was the last file to try
+                error("❌ All matching cluster files are corrupted or unreadable")
+            end
+            continue  # Try the next file
+        end
     end
-    
-    return loaded_data["data"], latest_file
 end
 
 # Ursell function for connected clusters (from original implementation)
@@ -173,7 +186,7 @@ function cluster_expansion_2d_ising_with_single_site_clusters(L::Int, β::Float6
     # Step 3: Compute BP fixed point
     println("\nStep 3: Computing BP fixed point...")
     messages = BP.get_messages(T, edges, links)
-    messages = BP.message_passing(T, messages, edges, adj_mat; max_iters=1000)
+    messages = BP.message_passing(T, messages, edges, adj_mat; α = 1., noise=0.1, max_iters=1000)
     println("✅ BP converged")
     
     # Get BP partition function (before normalization)
@@ -799,16 +812,27 @@ function plot_free_energy_vs_beta_with_single_site_clusters_efficient(L::Int, β
     cluster_filename = ""
     
     try
-        cluster_data, cluster_filename = load_latest_single_site_cluster_file(size_filter="L$L", weight_filter="w$(maximum(max_weights))")
-        println("✅ Loaded single-site cluster data from: $(cluster_filename)")
-    catch e
-        println("⚠️  Failed to load with specific weight, trying any weight...")
+        # Try to load any file that has weight >= maximum(max_weights)
+        min_required_weight = maximum(max_weights)
+        println("⚠️  Looking for clusters with weight >= $min_required_weight")
+        
+        # First try to load any weight that meets our requirement
         try
             cluster_data, cluster_filename = load_latest_single_site_cluster_file(size_filter="L$L")
-            println("✅ Loaded single-site cluster data from: $(cluster_filename)")
-        catch e2
-            error("❌ Could not load single-site cluster data for L=$L: $e2")
+            
+            # Check if the loaded file has sufficient weight
+            if cluster_data.max_weight >= min_required_weight
+                println("✅ Loaded single-site cluster data from: $(cluster_filename)")
+                println("   File max weight: $(cluster_data.max_weight) (>= required: $min_required_weight)")
+            else
+                println("⚠️  Loaded file has max weight $(cluster_data.max_weight) < required $min_required_weight")
+                println("   Will still proceed but some weight truncations may be incomplete")
+            end
+        catch e
+            error("❌ Could not load any single-site cluster file for L=$L: $e")
         end
+    catch e
+        error("❌ Could not load single-site cluster data for L=$L: $e")
     end
     
     # Initialize plot
@@ -1002,10 +1026,10 @@ function main()
     println("🚀 Cluster Expansion Free Energy Calculator (Using Single-Site Clusters - EFFICIENT)")
     println("="^80)
     
-    # Parameters - automatically use L11 since we have single-site data for it
-    L = 11
-    β_range = collect(0.1:0.02:0.8)  # β from 0.1 to 1.6 with fewer points for faster computation
-    max_weights = [4, 6, 8, 10]  # Start with smaller weights to ensure completion
+    # Parameters - automatically use L10 since we have single-site data for it
+    L = 10
+    β_range = collect(0.1:0.05:1.)  # β from 0.1 to 1.6 with fewer points for faster computation
+    max_weights = [4, 6, 8]  # Use available weights for L10 (we have w8 and w9)
     
     println("📋 Configuration:")
     println("   Lattice size: $(L)×$(L)")
