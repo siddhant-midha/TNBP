@@ -213,134 +213,143 @@ function bp_contract(tensors, loop_dict; maxiter=500, annealing=0.9, normalise=t
     return results
 end
 
-N = 10 
-T = N
-η_range = 0.0:0.2:2. 
-nsamples = 100
+function main()
+    """
+    Main function that runs the PEPS contraction comparison analysis.
+    This allows the file to be included without automatically running the experiment.
+    """
+    N = 10 
+    T = N
+    η_range = 0.0:0.2:2. 
+    nsamples = 100
 
-w_list = [4,6,8,10]
+    w_list = [4,6,8,10]
 
-# Load loop data for all weights
-loop_data = Dict()
-for w in w_list
-    data = load_latest_cluster_file(N,w)
-    loop_objects = data.all_loops
-    loop_data[w] = [loop_object.edges for loop_object in loop_objects]
-    println("Loaded $(length(loop_data[w])) loops for weight $w")
-end
-
-# Fixed parameters
-noise = 0
-ti = true   
-orthog = false   
-normalise = true 
-annealing = .9 
-maxiter = 500
-
-# Storage for results - now including vacuum (no loops) and all weights
-η_vals = collect(η_range)
-mean_errors = Dict()
-mean_errors["vacuum"] = Float64[]  # Standard BP without any loop corrections
-for w in w_list
-    mean_errors[w] = Float64[]
-end
-
-println("Comparing contraction methods across multiple loop orders...")
-
-for η in η_vals
-    println("Testing η = $η")
-    
-    # Storage for this η value
-    relative_errors = Dict()
-    relative_errors["vacuum"] = Float64[]
+    # Load loop data for all weights
+    loop_data = Dict()
     for w in w_list
-        relative_errors[w] = Float64[]
+        data = load_latest_cluster_file(N,w)
+        loop_objects = data.all_loops
+        loop_data[w] = [loop_object.edges for loop_object in loop_objects]
+        println("Loaded $(length(loop_data[w])) loops for weight $w")
     end
-    
-    for sample in 1:nsamples
-        # Generate random PEPS
-        tensors, peps = peps_controllable(N, T; η=η, ti=ti, orthog=orthog, noise=noise)
+
+    # Fixed parameters
+    noise = 0
+    ti = true   
+    orthog = false   
+    normalise = true 
+    annealing = .9 
+    maxiter = 500
+
+    # Storage for results - now including vacuum (no loops) and all weights
+    η_vals = collect(η_range)
+    mean_errors = Dict()
+    mean_errors["vacuum"] = Float64[]  # Standard BP without any loop corrections
+    for w in w_list
+        mean_errors[w] = Float64[]
+    end
+
+    println("Comparing contraction methods across multiple loop orders...")
+
+    for η in η_vals
+        println("Testing η = $η")
         
-        # Exact contraction
-        exact_result = contract_peps_no_phys(peps; cutoff=1E-9, maxdim=32)
+        # Storage for this η value
+        relative_errors = Dict()
+        relative_errors["vacuum"] = Float64[]
+        for w in w_list
+            relative_errors[w] = Float64[]
+        end
         
-        # Single BP run with all loop corrections
-        results = bp_contract(tensors, loop_data; maxiter=maxiter, annealing=annealing, normalise=normalise)
-        
-        # Compute relative errors for all methods
-        for method in ["vacuum"; w_list]
-            result = results[method]
+        for sample in 1:nsamples
+            # Generate random PEPS
+            tensors, peps = peps_controllable(N, T; η=η, ti=ti, orthog=orthog, noise=noise)
             
-            if abs(exact_result) > 1e-12
-                rel_error = abs(result - exact_result) / abs(exact_result)
-            else
-                rel_error = abs(result - exact_result)
+            # Exact contraction
+            exact_result = contract_peps_no_phys(peps; cutoff=1E-9, maxdim=32)
+            
+            # Single BP run with all loop corrections
+            results = bp_contract(tensors, loop_data; maxiter=maxiter, annealing=annealing, normalise=normalise)
+            
+            # Compute relative errors for all methods
+            for method in ["vacuum"; w_list]
+                result = results[method]
+                
+                if abs(exact_result) > 1e-12
+                    rel_error = abs(result - exact_result) / abs(exact_result)
+                else
+                    rel_error = abs(result - exact_result)
+                end
+                push!(relative_errors[method], rel_error)
             end
-            push!(relative_errors[method], rel_error)
+        end
+        
+        # Compute mean errors for this η
+        push!(mean_errors["vacuum"], mean(relative_errors["vacuum"]))
+        for w in w_list
+            push!(mean_errors[w], mean(relative_errors[w]))
+        end
+        
+        println("  Mean vacuum BP error: $(mean_errors["vacuum"][end])")
+        for w in w_list
+            println("  Mean w=$w loop-corrected error: $(mean_errors[w][end])")
         end
     end
-    
-    # Compute mean errors for this η
-    push!(mean_errors["vacuum"], mean(relative_errors["vacuum"]))
-    for w in w_list
-        push!(mean_errors[w], mean(relative_errors[w]))
-    end
-    
-    println("  Mean vacuum BP error: $(mean_errors["vacuum"][end])")
-    for w in w_list
-        println("  Mean w=$w loop-corrected error: $(mean_errors[w][end])")
-    end
-end
 
-# Create comprehensive plot
-p = plot(xlabel="η", 
-         ylabel="Relative Error",
-         title="BP vs Loop-Corrected PEPS Contraction Error (Multiple Orders)",
-         yscale=:log10,
-         grid=true,
-         legend=:topleft,
-         size=(800, 500))
+    # Create comprehensive plot
+    p = plot(xlabel="η", 
+             ylabel="Relative Error",
+             title="BP vs Loop-Corrected PEPS Contraction Error (Multiple Orders)",
+             yscale=:log10,
+             grid=true,
+             legend=:topleft,
+             size=(800, 500))
 
-# Define colors and markers for different methods
-colors = [:blue, :red, :green, :orange, :purple]
-markers = [:circle, :square, :diamond, :utriangle, :star5]
+    # Define colors and markers for different methods
+    colors = [:blue, :red, :green, :orange, :purple]
+    markers = [:circle, :square, :diamond, :utriangle, :star5]
 
-# Plot vacuum (standard BP)
-plot!(p, η_vals, mean_errors["vacuum"],
-      linewidth=2,
-      markershape=markers[1],
-      markersize=4,
-      label="Vacuum (Standard BP)",
-      color=colors[1])
-
-# Plot each loop order
-for (i, w) in enumerate(w_list)
-    plot!(p, η_vals, mean_errors[w],
+    # Plot vacuum (standard BP)
+    plot!(p, η_vals, mean_errors["vacuum"],
           linewidth=2,
-          markershape=markers[i+1],
+          markershape=markers[1],
           markersize=4,
-          label="Loop Order w=$w",
-          color=colors[i+1])
+          label="Vacuum (Standard BP)",
+          color=colors[1])
+
+    # Plot each loop order
+    for (i, w) in enumerate(w_list)
+        plot!(p, η_vals, mean_errors[w],
+              linewidth=2,
+              markershape=markers[i+1],
+              markersize=4,
+              label="Loop Order w=$w",
+              color=colors[i+1])
+    end
+
+    # Add some styling
+    plot!(p, xlims=(minimum(η_vals)-0.01, maximum(η_vals)+0.01))
+
+    display(p)
+
+    # Print comprehensive summary statistics
+    println("\nSummary:")
+    println("η range: $(minimum(η_vals)) to $(maximum(η_vals))")
+    println("Samples per η: $nsamples")
+    println("\nVacuum (Standard BP):")
+    println("  Min mean error: $(minimum(mean_errors["vacuum"]))")
+    println("  Max mean error: $(maximum(mean_errors["vacuum"]))")
+
+    for w in w_list
+        println("\nLoop Order w=$w:")
+        println("  Number of loops: $(length(loop_data[w]))")
+        println("  Min mean error: $(minimum(mean_errors[w]))")
+        println("  Max mean error: $(maximum(mean_errors[w]))")
+    end
+
+    readline()
 end
 
-# Add some styling
-plot!(p, xlims=(minimum(η_vals)-0.01, maximum(η_vals)+0.01))
-
-display(p)
-
-# Print comprehensive summary statistics
-println("\nSummary:")
-println("η range: $(minimum(η_vals)) to $(maximum(η_vals))")
-println("Samples per η: $nsamples")
-println("\nVacuum (Standard BP):")
-println("  Min mean error: $(minimum(mean_errors["vacuum"]))")
-println("  Max mean error: $(maximum(mean_errors["vacuum"]))")
-
-for w in w_list
-    println("\nLoop Order w=$w:")
-    println("  Number of loops: $(length(loop_data[w]))")
-    println("  Min mean error: $(minimum(mean_errors[w]))")
-    println("  Max mean error: $(maximum(mean_errors[w]))")
-end
-
-readline()
+# Uncomment the line below to run the main analysis
+# main()
