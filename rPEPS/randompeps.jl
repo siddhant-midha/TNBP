@@ -1,15 +1,13 @@
 using ITensors, ITensorMPS, Plots, LaTeXStrings
 using ProgressMeter, Graphs, LinearAlgebra
-using Combinatorics
 using Statistics
-using Test
 using Serialization
 
-include("dependencies.jl")
-include("functions/ClusterEnumeration.jl")
-include("functions/boundary_evolution.jl")
+include("../dependencies.jl")
+include("../functions/ClusterEnumeration.jl")
+include("../functions/boundary_evolution.jl")
 
-push!(LOAD_PATH, "functions/")
+push!(LOAD_PATH, "../functions/")
 using BP
 
 function load_latest_cluster_file(N,w)
@@ -51,9 +49,9 @@ function ortho(T::ITensor, v::Vector{Float64})
     return T 
 end 
 
-function controllable_tensor(i1_in, i2_in, i1_out, i2_out; η=0, orthog=true, noise=0, biasing=false)
+function controllable_tensor(i1_in, i2_in, i1_out, i2_out; η=0, orthog=true)
     """
-    Creates a controllable 4-index tensor with adjustable rank-1 structure and noise.
+    Creates a controllable 4-index tensor with adjustable rank-1 structure.
     
     This function generates a tensor that interpolates between a pure rank-1 tensor
     and a random tensor, allowing controlled studies of tensor network properties.
@@ -64,16 +62,13 @@ function controllable_tensor(i1_in, i2_in, i1_out, i2_out; η=0, orthog=true, no
            - η=0: Pure rank-1 tensor  
            - η>0: Mix of rank-1 + random components
         orthog: Whether to orthogonalize random component against rank-1 part (default: true)
-        noise: Amplitude of random noise added to the base vector (default: 0)
-        biasing: If true, initializes with biased vector (ones + noise), else random (default: false)
     
     Returns:
         ITensor: A 4-index tensor with controllable structure
     """
     
     # Generate base vector for rank-1 component
-    # biasing=true creates a vector favoring certain basis states
-    vec = biasing ? (ones(dim(i1_in)) + noise * rand(dim(i1_in))) : rand(dim(i1_in))
+    vec = rand(dim(i1_in))
     vec = vec / norm(vec)  # Normalize to unit length
     
     # Create rank-1 tensor: outer product of the same vector on all indices
@@ -98,12 +93,12 @@ function controllable_tensor(i1_in, i2_in, i1_out, i2_out; η=0, orthog=true, no
     f = fp + η * fm 
     
     # Note: Final normalization is commented out to preserve the mixing ratio
-    f = f / norm(f)
+    # f = f / norm(f)
     
     return f
 end
 
-function peps_controllable(N, T; η=0, ti=true, orthog=true, noise = 0, biasing = false)
+function peps_controllable(N, T; η=0, ti=true, orthog=true)
     ## if ti = true all tensors are identical, else all random, different
     ## if return_peps = true returns the peps matrix, else returns the tensors list
     χ = 2
@@ -111,7 +106,7 @@ function peps_controllable(N, T; η=0, ti=true, orthog=true, noise = 0, biasing 
     hinds = [Index(χ, "n$(n)h$(t)") for n in 1:N-1, t in 1:T]
 
     down, up, left, right = Index(2,"down"), Index(2,"up"), Index(2,"left"), Index(2,"right")
-    tens_main = controllable_tensor(down, up, left, right; η=η, orthog=orthog,noise=noise,biasing=biasing)
+    tens_main = controllable_tensor(down, up, left, right; η=η, orthog=orthog)
 
     tensors = []
     peps = Matrix{ITensor}(undef, T, N)
@@ -121,7 +116,7 @@ function peps_controllable(N, T; η=0, ti=true, orthog=true, noise = 0, biasing 
                 tens = copy(tens_main)
             else 
                 down, up, left, right = Index(2,"down"), Index(2,"up"), Index(2,"left"), Index(2,"right")
-                tens = controllable_tensor(down, up, left, right; η=η, orthog=orthog,noise=noise,biasing=biasing)
+                tens = controllable_tensor(down, up, left, right; η=η, orthog=orthog)
             end 
             # Vertical connections (up/down)
             if t == 1
@@ -177,7 +172,7 @@ function bp_contract(tensors, loop_dict; maxiter=500, annealing=0.9, normalise=t
     messages  = BP.message_passing(tensors, messages, edges, adj_mat; 
                                     α=annealing, max_iters=maxiter, diagnose=false, normalise=normalise)
     Z_list = BP.get_fixed_point_list(tensors,messages,adj_mat)    
-    tensors = BP.normalize_tensors(tensors,Z_list)                      
+    tensors = BP.normalize_tensors(tensors,Z_list)             
     Z = prod(Z_list)
     
     # Initialize results dictionary
@@ -212,144 +207,3 @@ function bp_contract(tensors, loop_dict; maxiter=500, annealing=0.9, normalise=t
     
     return results
 end
-
-function main()
-    """
-    Main function that runs the PEPS contraction comparison analysis.
-    This allows the file to be included without automatically running the experiment.
-    """
-    N = 10 
-    T = N
-    η_range = 0.0:0.2:2. 
-    nsamples = 100
-
-    w_list = [4,6,8,10]
-
-    # Load loop data for all weights
-    loop_data = Dict()
-    for w in w_list
-        data = load_latest_cluster_file(N,w)
-        loop_objects = data.all_loops
-        loop_data[w] = [loop_object.edges for loop_object in loop_objects]
-        println("Loaded $(length(loop_data[w])) loops for weight $w")
-    end
-
-    # Fixed parameters
-    noise = 0
-    ti = true   
-    orthog = false   
-    normalise = true 
-    annealing = .9 
-    maxiter = 500
-
-    # Storage for results - now including vacuum (no loops) and all weights
-    η_vals = collect(η_range)
-    mean_errors = Dict()
-    mean_errors["vacuum"] = Float64[]  # Standard BP without any loop corrections
-    for w in w_list
-        mean_errors[w] = Float64[]
-    end
-
-    println("Comparing contraction methods across multiple loop orders...")
-
-    for η in η_vals
-        println("Testing η = $η")
-        
-        # Storage for this η value
-        relative_errors = Dict()
-        relative_errors["vacuum"] = Float64[]
-        for w in w_list
-            relative_errors[w] = Float64[]
-        end
-        
-        for sample in 1:nsamples
-            # Generate random PEPS
-            tensors, peps = peps_controllable(N, T; η=η, ti=ti, orthog=orthog, noise=noise)
-            
-            # Exact contraction
-            exact_result = contract_peps_no_phys(peps; cutoff=1E-9, maxdim=32)
-            
-            # Single BP run with all loop corrections
-            results = bp_contract(tensors, loop_data; maxiter=maxiter, annealing=annealing, normalise=normalise)
-            
-            # Compute relative errors for all methods
-            for method in ["vacuum"; w_list]
-                result = results[method]
-                
-                if abs(exact_result) > 1e-12
-                    rel_error = abs(result - exact_result) / abs(exact_result)
-                else
-                    rel_error = abs(result - exact_result)
-                end
-                push!(relative_errors[method], rel_error)
-            end
-        end
-        
-        # Compute mean errors for this η
-        push!(mean_errors["vacuum"], mean(relative_errors["vacuum"]))
-        for w in w_list
-            push!(mean_errors[w], mean(relative_errors[w]))
-        end
-        
-        println("  Mean vacuum BP error: $(mean_errors["vacuum"][end])")
-        for w in w_list
-            println("  Mean w=$w loop-corrected error: $(mean_errors[w][end])")
-        end
-    end
-
-    # Create comprehensive plot
-    p = plot(xlabel="η", 
-             ylabel="Relative Error",
-             title="BP vs Loop-Corrected PEPS Contraction Error (Multiple Orders)",
-             yscale=:log10,
-             grid=true,
-             legend=:topleft,
-             size=(800, 500))
-
-    # Define colors and markers for different methods
-    colors = [:blue, :red, :green, :orange, :purple]
-    markers = [:circle, :square, :diamond, :utriangle, :star5]
-
-    # Plot vacuum (standard BP)
-    plot!(p, η_vals, mean_errors["vacuum"],
-          linewidth=2,
-          markershape=markers[1],
-          markersize=4,
-          label="Vacuum (Standard BP)",
-          color=colors[1])
-
-    # Plot each loop order
-    for (i, w) in enumerate(w_list)
-        plot!(p, η_vals, mean_errors[w],
-              linewidth=2,
-              markershape=markers[i+1],
-              markersize=4,
-              label="Loop Order w=$w",
-              color=colors[i+1])
-    end
-
-    # Add some styling
-    plot!(p, xlims=(minimum(η_vals)-0.01, maximum(η_vals)+0.01))
-
-    display(p)
-
-    # Print comprehensive summary statistics
-    println("\nSummary:")
-    println("η range: $(minimum(η_vals)) to $(maximum(η_vals))")
-    println("Samples per η: $nsamples")
-    println("\nVacuum (Standard BP):")
-    println("  Min mean error: $(minimum(mean_errors["vacuum"]))")
-    println("  Max mean error: $(maximum(mean_errors["vacuum"]))")
-
-    for w in w_list
-        println("\nLoop Order w=$w:")
-        println("  Number of loops: $(length(loop_data[w]))")
-        println("  Min mean error: $(minimum(mean_errors[w]))")
-        println("  Max mean error: $(maximum(mean_errors[w]))")
-    end
-
-    readline()
-end
-
-# Uncomment the line below to run the main analysis
-# main()
