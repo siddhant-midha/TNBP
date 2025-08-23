@@ -1,64 +1,6 @@
 include("randompeps.jl")
+include("cluster_exp.jl")
 using JLD2, FileIO, Dates, Statistics
-
-# Ursell function for connected clusters (from original implementation)
-function ursell_function(cluster::Cluster)
-    """
-    Compute the Ursell function φ(W) for a connected cluster W.
-    For connected clusters, this is (-1)^(|W|-1) * (|W|-1)!
-    where |W| is the total number of loops in the cluster (with multiplicities).
-    """
-    total_loops = cluster.total_loops
-    if total_loops == 1
-        return 1.0
-    else
-        # φ(W) = (-1)^(|W|-1) * (|W|-1)!
-        sign = (total_loops - 1) % 2 == 0 ? 1.0 : -1.0
-        factorial_part = factorial(big(total_loops - 1))
-        return sign * Float64(factorial_part)
-    end
-end
-
-function cluster_contr(T_normalized, messages, edges, links, adj_mat, cluster, all_loops)
-    # Compute Ursell function φ(W)
-    phi_W = ursell_function(cluster)
-    
-    # if abs(phi_W) < 1e-15
-    #     return 0.0  # Skip negligible contributions
-    # end
-    
-    # Compute cluster correction Z_W = ∏_i Z_{l_i}^{η_i}
-    Z_W = 1.0 + 0im  # Complex number for cluster contribution
-    # invalidloop = false 
-    for loop_id in cluster.loop_ids
-        multiplicity = cluster.multiplicities[loop_id]
-        loop = all_loops[loop_id]
-        
-        # Convert loop edges format for BP.jl (ensure v1 < v2 ordering)
-        loop_edges_bp = Tuple{Int,Int}[]
-        for edge in loop.edges
-            v1, v2 = edge
-            push!(loop_edges_bp, (min(v1, v2), max(v1, v2)))
-        end
-        
-        # Compute loop contribution Z_l using BP
-        try
-            Z_l_tensor = BP.loop_contribution(loop_edges_bp, messages, T_normalized, edges, links, adj_mat)
-            # Extract scalar value from ITensor
-            Z_l = scalar(Z_l_tensor)
-            Z_W *= Z_l^multiplicity
-        catch e
-            # println("⚠️  Error computing loop contribution for loop $loop_id: $e")
-            # println("invalid loops present...", !(all([e in edges for e in loop_edges_bp])))
-            return 0.0  # Return 0 instead of breaking
-        end
-    end
-    
-    # Contribution to log partition function (not free energy)
-    # According to polymer theory: log(Z) = log(Z_BP) + Σ φ(W) Z_W
-    contribution = phi_W * Z_W 
-    return real(contribution)  # Return real part only
-end 
 
 
 function run_cluster_correction_analysis(N::Int, w::Int, η::Float64, nsamples::Int)
@@ -73,11 +15,21 @@ function run_cluster_correction_analysis(N::Int, w::Int, η::Float64, nsamples::
     println("="^80)
     
     # Load cluster data once
+    cluster_data = nothing
+    clusters_by_site = nothing
+    all_loops = nothing
+    
     try
         cluster_data = load_latest_cluster_file(N, w)
         clusters_by_site = cluster_data.clusters_by_site
         all_loops = cluster_data.all_loops
         println("✅ Loaded cluster data successfully")
+        println("🔍 Debug: clusters_by_site has $(length(clusters_by_site)) sites")
+        println("🔍 Debug: all_loops has $(length(all_loops)) loops")
+        if length(clusters_by_site) > 0
+            first_site_clusters = length(clusters_by_site[1])
+            println("🔍 Debug: First site has $first_site_clusters clusters")
+        end
     catch e
         println("❌ Failed to load cluster data for N=$N, w=$w: $e")
         return nothing
@@ -137,15 +89,31 @@ function run_cluster_correction_analysis(N::Int, w::Int, η::Float64, nsamples::
             end
             
             # Compute contributions for unique clusters
+            valid_contributions = 0
+            total_contributions = 0
             for (sig, cluster_list) in clusters_by_signature
                 cluster = cluster_list[1][2]  # Take first representative
                 contribution = cluster_contr(T_normalized, messages, edges, links, adj_mat, cluster, all_loops)
+                total_contributions += 1
                 if !isnan(contribution) && isfinite(contribution)
                     clustercorrx += contribution
+                    valid_contributions += 1
                 end
             end
             
             cluster_FE_density_correction = clustercorrx / (N*T)
+            
+            # Debug output for first sample only (to avoid login node overload)
+            if sample == 1
+                println("  🔍 Sample 1 debug:")
+                println("    Unique cluster signatures: $(length(clusters_by_signature))")
+                println("    Total contributions attempted: $total_contributions")
+                println("    Valid contributions: $valid_contributions")
+                println("    Raw cluster correction sum: $clustercorrx")
+                println("    Cluster FE correction density: $cluster_FE_density_correction")
+                println("    BP error: $(abs(bp_FE_density - exact_FE_density))")
+                println("    Will be cluster error: $(abs(bp_FE_density + cluster_FE_density_correction - exact_FE_density))")
+            end
             
             # Calculate errors
             bp_error = abs(bp_FE_density - exact_FE_density)
@@ -252,7 +220,7 @@ end
 w_list = [4, 6, 8, 10]  # Available cluster weights
 N_list = [5, 10]    # Available system sizes  
 η_list = [0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1.0]  # η values
-nsamples = 100      # Number of samples per combination
+nsamples = 1000      # Number of samples per combination
 
 # Get task ID from command line argument or environment variable
 task_id = nothing
