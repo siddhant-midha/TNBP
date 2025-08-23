@@ -54,7 +54,7 @@ function cluster_contr(T_normalized, messages, edges, links, adj_mat, cluster, a
     end
     
     # Add contribution to free energy density
-    contribution = -phi_W * Z_W 
+    contribution = phi_W * Z_W 
     return real(contribution)  # Return real part only
 end 
 
@@ -81,7 +81,7 @@ N = 10
 T = N
 η = 0.1
 nsamples = 1
-w = 4
+w = 8
 
 cluster_data = load_latest_cluster_file(N,w)
 clusters_by_site = cluster_data.clusters_by_site
