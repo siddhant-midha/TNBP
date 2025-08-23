@@ -1,9 +1,9 @@
-push!(LOAD_PATH, "functions/")
+push!(LOAD_PATH, "../functions/")
 using BP
 using Random, Plots, SparseArrays, ITensors, Statistics, ProgressMeter, Colors, LinearAlgebra, CSV, DataFrames, Dates
 include("ldpc_tanner_loops.jl")
-include("functions/tc_decode.jl")
-include("functions/decoding.jl")
+include("../functions/tc_decode.jl")
+include("../functions/decoding.jl")
 include("toric_loops.jl")
 using .ToricLoops
 

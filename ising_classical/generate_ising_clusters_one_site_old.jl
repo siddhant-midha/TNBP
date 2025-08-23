@@ -12,8 +12,8 @@ Usage:
     julia generate_ising_clusters_one_site.jl --help
 """
 
-include("dependencies.jl")
-include("functions/ClusterEnumeration.jl")
+include("../dependencies.jl")
+include("../functions/ClusterEnumeration.jl")
 
 using ArgParse
 using ProgressMeter

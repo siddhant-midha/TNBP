@@ -12,9 +12,9 @@ Usage:
     julia generate_ising_loops_one_site.jl --help
 """
 
-include("dependencies.jl")
-include("functions/LoopEnumeration.jl")
-include("functions/loop_enumeration_square.jl")
+include("../dependencies.jl")
+include("../functions/LoopEnumeration.jl")
+include("../functions/loop_enumeration_square.jl")
 
 using ArgParse
 using ProgressMeter

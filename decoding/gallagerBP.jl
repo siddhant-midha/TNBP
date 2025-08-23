@@ -3,8 +3,8 @@ using ITensors, ITensorMPS, Plots
 using ProgressMeter, Statistics, Random, SparseArrays
 using JLD2, Printf
 include("ldpc_tanner_loops.jl")
-include("functions/decoding.jl")
-push!(LOAD_PATH, "functions/")
+include("../functions/decoding.jl")
+push!(LOAD_PATH, "../functions/")
 using BP
 
 

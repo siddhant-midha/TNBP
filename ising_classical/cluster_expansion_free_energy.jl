@@ -7,11 +7,11 @@ Implementation of cluster expansion for 2D Ising model free energy density using
 Follows exactly the workflow from functions/cluster_expansion_2d_ising.jl but uses pre-computed clusters.
 """
 
-include("dependencies.jl")
-include("functions/ClusterEnumeration.jl")
-include("functions/Ising2D.jl")
-include("functions/BP.jl")
-include("test/test_utils.jl")
+include("../dependencies.jl")
+include("../functions/ClusterEnumeration.jl")
+include("../functions/Ising2D.jl")
+include("../functions/BP.jl")
+include("../test/test_utils.jl")
 using Serialization
 using Plots
 using ITensors, Graphs
