@@ -89,7 +89,7 @@ function run_loop_correction_analysis(N::Int, w::Int, η::Float64, nsamples::Int
             end
             
             # Apply loop correction to free energy per site: log(Z + correction) / (N*T)
-            loop_FE_per_site_correction = log(1.0 + loop_correction_sum)
+            loop_FE_per_site_correction = log(1.0 + loop_correction_sum) / (N*T)
             corrected_FE_per_site = bp_FE_per_site + loop_FE_per_site_correction
             
             # Debug output for first few samples
