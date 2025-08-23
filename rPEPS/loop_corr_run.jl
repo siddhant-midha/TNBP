@@ -1,42 +1,39 @@
 include("randompeps.jl")
-include("cluster_exp.jl")
 using JLD2, FileIO, Dates, Statistics
 
 
-function run_cluster_correction_analysis(N::Int, w::Int, η::Float64, nsamples::Int)
+function run_loop_correction_analysis(N::Int, w::Int, η::Float64, nsamples::Int)
     """
-    Run cluster correction analysis for given parameters.
-    Uses complex arithmetic in log calculations to avoid domain errors.
+    Run naive loop correction analysis for given parameters.
     Computes free energy per site errors: log(Z) / (N*T).
     Returns Dict with results including average free energy per site errors.
     """
     
     println("="^80)
-    println("🔥 Running Cluster Correction Analysis")
+    println("🔄 Running Naive Loop Correction Analysis")
     println("Parameters: N=$N, w=$w, η=$η, nsamples=$nsamples")
     println("="^80)
     
-    # Load cluster data once
+    # Load loop data once
     cluster_data = nothing
-    clusters_by_site = nothing
     all_loops = nothing
     
     try
         cluster_data = load_latest_cluster_file(N, w)
-        clusters_by_site = cluster_data.clusters_by_site
-        all_loops = cluster_data.all_loops
-        println("✅ Loaded cluster data successfully")
+        loop_objects = cluster_data.all_loops  
+        all_loops = [loop_object.edges for loop_object in loop_objects]
+        println("✅ Loaded loop data successfully ($(length(all_loops)) loops)")
     catch e
-        println("❌ Failed to load cluster data for N=$N, w=$w: $e")
+        println("❌ Failed to load loop data for N=$N, w=$w: $e")
         return nothing
     end
     
     # Storage for results
     bp_errors = Float64[]           # Free energy per site errors
-    cluster_errors = Float64[]      # Free energy per site errors with cluster correction
-    bp_fe_densities = Float64[]     # BP free energy per site values
-    exact_fe_densities = Float64[]  # Exact free energy per site values
-    cluster_corrections = Float64[] # FE density corrections (real parts)
+    loop_errors = Float64[]         # Free energy per site errors with loop correction
+    bp_fe_per_sites = Float64[]     # BP free energy per site values
+    exact_fe_per_sites = Float64[]  # Exact free energy per site values
+    loop_corrections = Float64[]    # Loop corrections (real parts)
     
     # Fixed parameters
     ti = true   
@@ -57,59 +54,68 @@ function run_cluster_correction_analysis(N::Int, w::Int, η::Float64, nsamples::
             # Generate random PEPS
             tensors, peps = peps_controllable(N, T; η=η, ti=ti, orthog=orthog)
             exact_PF = contract_peps_no_phys(peps; cutoff=1E-12, maxdim=2^N)
-            exact_FE_per_site = log(Complex(exact_PF)) / (N*T)  # Complex log to handle any edge cases
+            exact_FE_per_site = log(Complex(exact_PF)) / (N*T)  # Complex log for safety
             
-            # BP calculation - ensure complex arithmetic throughout
+            # BP calculation
             adj_mat, edges, links = BP.get_adj_mat(tensors)
             messages = BP.get_messages(tensors, edges, links; random_part=0.01)
             messages = BP.message_passing(tensors, messages, edges, adj_mat; α=annealing, max_iters=maxiter)
             
             Z_l = BP.get_fixed_point_list(tensors, messages, adj_mat)
-            # Ensure Z_l entries are complex before taking log
+            
+            # Compute BP free energy per site using complex arithmetic
             Z_l_complex = Complex.(Z_l)
             bp_FE_per_site = sum(log.(Z_l_complex)) / (N*T)
-            
             T_normalized = BP.normalize_tensors(tensors, Z_l)
             
-            # Cluster correction (using manual deduplication) - use complex arithmetic
-            clustercorrx = 0.0 + 0.0im  # Start with complex number
+            # Naive loop correction - compute correction term to free energy per site
+            loop_correction_sum = 0.0 + 0.0im  # Start with complex number for robustness
+            valid_loops = 0
+            total_loops = 0
             
-            # Deduplicate clusters manually (we know Set doesn't work)
-            clusters_by_signature = Dict{Tuple, Vector{Tuple{Int, Cluster}}}()
-            
-            for site in 1:(N*T)
-                clusters = clusters_by_site[site]
-                for cluster in clusters
-                    signature = (cluster.weight, cluster.total_loops, sort(cluster.loop_ids), sort(collect(cluster.multiplicities)))
-                    if !haskey(clusters_by_signature, signature)
-                        clusters_by_signature[signature] = []
+            for loop in all_loops
+                total_loops += 1
+                if all([e in edges for e in loop])
+                    try
+                        loop_contri = scalar(BP.loop_contribution(loop, messages, T_normalized, edges, links, adj_mat))
+                        # Add loop contribution to correction sum
+                        loop_correction_sum += Complex(loop_contri)
+                        valid_loops += 1
+                    catch e
+                        # Skip loops that cause errors
+                        continue
                     end
-                    push!(clusters_by_signature[signature], (site, cluster))
                 end
             end
             
-            # Compute contributions for unique clusters
-            for (sig, cluster_list) in clusters_by_signature
-                cluster = cluster_list[1][2]  # Take first representative
-                contribution = cluster_contr(T_normalized, messages, edges, links, adj_mat, cluster, all_loops)
-                if !isnan(contribution) && isfinite(contribution)
-                    clustercorrx += Complex(contribution)  # Ensure complex arithmetic
-                end
-            end
+            # Apply loop correction to free energy per site: log(Z + correction) / (N*T)
+            loop_FE_per_site_correction = log(1.0 + loop_correction_sum)
+            corrected_FE_per_site = bp_FE_per_site + loop_FE_per_site_correction
             
-            cluster_FE_per_site_correction = clustercorrx / (N*T)
-            corrected_FE_per_site = bp_FE_per_site + cluster_FE_per_site_correction
+            # Debug output for first few samples
+            if sample <= 3
+                println("  Sample $sample debug:")
+                println("    Total loops: $total_loops")
+                println("    Valid loops: $valid_loops")
+                println("    Exact FE per site: $exact_FE_per_site")
+                println("    BP FE per site: $bp_FE_per_site")
+                println("    Loop correction sum: $loop_correction_sum")
+                println("    FE per site correction: $loop_FE_per_site_correction")
+                println("    Corrected FE per site: $corrected_FE_per_site")
+                println("    BP FE error: $(abs(bp_FE_per_site - exact_FE_per_site))")
+                println("    Loop corrected FE error: $(abs(corrected_FE_per_site - exact_FE_per_site))")
+            end
             
             # Calculate free energy per site errors
             bp_error = abs(bp_FE_per_site - exact_FE_per_site)
-            cluster_error = abs(corrected_FE_per_site - exact_FE_per_site)
+            loop_error = abs(corrected_FE_per_site - exact_FE_per_site)
             
             # Store results
             push!(bp_errors, bp_error)
-            push!(cluster_errors, cluster_error)
-            push!(bp_fe_densities, real(bp_FE_per_site))
-            push!(exact_fe_densities, real(exact_FE_per_site))
-            push!(cluster_corrections, real(cluster_FE_per_site_correction))
+            push!(loop_errors, loop_error)
+            push!(bp_fe_per_sites, real(bp_FE_per_site))
+            push!(exact_fe_per_sites, real(exact_FE_per_site))
+            push!(loop_corrections, real(loop_FE_per_site_correction))  # Store FE correction
             
         catch e
             println("⚠️  Error in sample $sample: $e")
@@ -131,29 +137,30 @@ function run_cluster_correction_analysis(N::Int, w::Int, η::Float64, nsamples::
         "nsamples_successful" => length(bp_errors),
         "bp_fe_error_mean" => mean(bp_errors),
         "bp_fe_error_std" => std(bp_errors),
-        "cluster_fe_error_mean" => mean(cluster_errors),
-        "cluster_fe_error_std" => std(cluster_errors),
-        "fe_improvement_mean" => mean(bp_errors) - mean(cluster_errors),
-        "fe_improvement_std" => std(bp_errors .- cluster_errors),
-        "cluster_correction_mean" => mean(cluster_corrections),
-        "cluster_correction_std" => std(cluster_corrections),
+        "loop_fe_error_mean" => mean(loop_errors),
+        "loop_fe_error_std" => std(loop_errors),
+        "fe_improvement_mean" => mean(bp_errors) - mean(loop_errors),
+        "fe_improvement_std" => std(bp_errors .- loop_errors),
+        "loop_correction_mean" => mean(loop_corrections),
+        "loop_correction_std" => std(loop_corrections),
         "timestamp" => string(now()),
         # Store all raw data for detailed analysis
         "bp_fe_errors" => bp_errors,
-        "cluster_fe_errors" => cluster_errors,
+        "loop_fe_errors" => loop_errors,
+        "bp_fe_per_sites" => bp_fe_per_sites,
+        "exact_fe_per_sites" => exact_fe_per_sites,
         # Keep old names for backward compatibility
         "bp_errors" => bp_errors,
-        "cluster_errors" => cluster_errors,
-        "bp_fe_densities" => bp_fe_densities,
-        "exact_fe_densities" => exact_fe_densities,
-        "cluster_corrections" => cluster_corrections
+        "loop_errors" => loop_errors,
+        "exact_fe_per_sites" => exact_fe_per_sites,
+        "loop_corrections" => loop_corrections
     )
     
     println("✅ Analysis complete!")
     println("  Successful samples: $(length(bp_errors))/$nsamples")
     println("  BP free energy per site error (mean ± std): $(mean(bp_errors)) ± $(std(bp_errors))")
-    println("  Cluster free energy per site error (mean ± std): $(mean(cluster_errors)) ± $(std(cluster_errors))")
-    println("  Free energy per site improvement: $(mean(bp_errors) - mean(cluster_errors))")
+    println("  Loop free energy per site error (mean ± std): $(mean(loop_errors)) ± $(std(loop_errors))")
+    println("  Free energy per site improvement: $(mean(bp_errors) - mean(loop_errors))")
     
     return results
 end
@@ -183,7 +190,7 @@ function get_parameter_combination(task_id::Int, N_list::Vector{Int}, w_list::Ve
     return N_list[N_idx], w_list[w_idx], η_list[η_idx]
 end
 
-function save_results(results::Dict, save_dir::String="cluster_correction_results")
+function save_results(results::Dict, save_dir::String="loop_correction_results")
     """
     Save results to a JLD2 file in the specified directory.
     """
@@ -195,7 +202,7 @@ function save_results(results::Dict, save_dir::String="cluster_correction_result
     N, w, η = results["N"], results["w"], results["eta"]
     timestamp = replace(string(now()), ":" => "-")  # Make filename safe
     
-    filename = "cluster_results_N$(N)_w$(w)_eta$(round(η, digits=3))_$(timestamp).jld2"
+    filename = "loop_results_N$(N)_w$(w)_eta$(round(η, digits=3))_$(timestamp).jld2"
     filepath = joinpath(save_dir, filename)
     
     save(filepath, "results", results)
@@ -205,7 +212,7 @@ function save_results(results::Dict, save_dir::String="cluster_correction_result
 end
 
 # Configuration
-w_list = [4, 6, 8, 10]  # Available cluster weights
+w_list = [4, 6, 8, 10]  # Available loop weights
 N_list = [5, 10]    # Available system sizes  
 η_list = [0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1.0]  # η values
 nsamples = 1000      # Number of samples per combination
@@ -220,7 +227,7 @@ elseif haskey(ENV, "PBS_ARRAYID")
     task_id = parse(Int, ENV["PBS_ARRAYID"])
 else
     println("❌ No task ID provided!")
-    println("Usage: julia cluster_exp_run.jl <task_id>")
+    println("Usage: julia loop_corr_run.jl <task_id>")
     println("   or set SLURM_ARRAY_TASK_ID or PBS_ARRAYID environment variable")
     
     total_tasks = length(N_list) * length(w_list) * length(η_list)
@@ -242,7 +249,7 @@ println("📋 Parameters: N=$N, w=$w, η=$η")
 println("🔢 Running $nsamples samples")
 
 # Run the analysis
-results = run_cluster_correction_analysis(N, w, η, nsamples)
+results = run_loop_correction_analysis(N, w, η, nsamples)
 
 if results !== nothing
     # Save results

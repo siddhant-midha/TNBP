@@ -47,12 +47,13 @@ function ortho(T::ITensor, v::Vector{Float64})
     return T 
 end 
 
-function controllable_tensor(i1_in, i2_in, i1_out, i2_out; η=0, orthog=true)
+function controllable_tensor(i1_in, i2_in, i1_out, i2_out; η=0, orthog=false)
     """
-    Creates a controllable 4-index tensor with adjustable rank-1 structure.
+    Creates a controllable 4-index tensor with adjustable rank-1 structure and positive entries.
     
     This function generates a tensor that interpolates between a pure rank-1 tensor
     and a random tensor, allowing controlled studies of tensor network properties.
+    Both components have only positive entries to ensure positive partition functions.
     
     Args:
         i1_in, i2_in, i1_out, i2_out: ITensor indices for the four legs of the tensor
@@ -62,26 +63,33 @@ function controllable_tensor(i1_in, i2_in, i1_out, i2_out; η=0, orthog=true)
         orthog: Whether to orthogonalize random component against rank-1 part (default: true)
     
     Returns:
-        ITensor: A 4-index tensor with controllable structure
+        ITensor: A 4-index tensor with controllable structure and positive entries
     """
     
-    # Generate base vector for rank-1 component
+    # Generate base vector for rank-1 component with positive entries
     vec = rand(dim(i1_in))
+    vec = abs.(vec)  # Ensure all entries are positive
     vec = vec / norm(vec)  # Normalize to unit length
-    
     # Create rank-1 tensor: outer product of the same vector on all indices
     # This creates a fully separable tensor T[i,j,k,l] = v[i] * v[j] * v[k] * v[l]
     fp = ITensor(vec, i1_in) * ITensor(vec, i2_in) * ITensor(vec, i1_out) * ITensor(vec, i2_out)
     fp = fp / norm(fp)  # Normalize the rank-1 component
     
-    # Create random component
+    # Create random component with positive entries
     if orthog
         # Generate random tensor and orthogonalize it against the rank-1 vector
         # This ensures the random component is truly orthogonal to the rank-1 part
         fm = ortho(randomITensor(i1_in, i2_in, i1_out, i2_out), vec)
+        # Make all entries positive after orthogonalization
+        fm_array = Array(fm, i1_in, i2_in, i1_out, i2_out)
+        fm_array = abs.(fm_array)
+        fm = ITensor(fm_array, i1_in, i2_in, i1_out, i2_out)
     else
-        # Use completely random tensor (not orthogonalized)
+        # Use completely random tensor with positive entries
         fm = randomITensor(i1_in, i2_in, i1_out, i2_out)
+        fm_array = Array(fm, i1_in, i2_in, i1_out, i2_out)
+        fm_array = abs.(fm_array)
+        fm = ITensor(fm_array, i1_in, i2_in, i1_out, i2_out)
     end
     fm = fm / norm(fm)  # Normalize the random component
     
