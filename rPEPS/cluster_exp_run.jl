@@ -103,17 +103,17 @@ function run_cluster_correction_analysis(N::Int, w::Int, η::Float64, nsamples::
             
             cluster_FE_density_correction = clustercorrx / (N*T)
             
-            # Debug output for first sample only (to avoid login node overload)
-            if sample == 1
-                println("  🔍 Sample 1 debug:")
-                println("    Unique cluster signatures: $(length(clusters_by_signature))")
-                println("    Total contributions attempted: $total_contributions")
-                println("    Valid contributions: $valid_contributions")
-                println("    Raw cluster correction sum: $clustercorrx")
-                println("    Cluster FE correction density: $cluster_FE_density_correction")
-                println("    BP error: $(abs(bp_FE_density - exact_FE_density))")
-                println("    Will be cluster error: $(abs(bp_FE_density + cluster_FE_density_correction - exact_FE_density))")
-            end
+            # # Debug output for first sample only (to avoid login node overload)
+            # if sample == 1
+            #     println("  🔍 Sample 1 debug:")
+            #     println("    Unique cluster signatures: $(length(clusters_by_signature))")
+            #     println("    Total contributions attempted: $total_contributions")
+            #     println("    Valid contributions: $valid_contributions")
+            #     println("    Raw cluster correction sum: $clustercorrx")
+            #     println("    Cluster FE correction density: $cluster_FE_density_correction")
+            #     println("    BP error: $(abs(bp_FE_density - exact_FE_density))")
+            #     println("    Will be cluster error: $(abs(bp_FE_density + cluster_FE_density_correction - exact_FE_density))")
+            # end
             
             # Calculate errors
             bp_error = abs(bp_FE_density - exact_FE_density)
