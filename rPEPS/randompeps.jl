@@ -1,12 +1,10 @@
-using ITensors, ITensorMPS, Plots, LaTeXStrings
-using ProgressMeter, Graphs, LinearAlgebra
+using ITensors, ITensorMPS
+using ProgressMeter, LinearAlgebra
 using Statistics
 using Serialization
 
-include("../dependencies.jl")
 include("../functions/ClusterEnumeration.jl")
 include("../functions/boundary_evolution.jl")
-
 push!(LOAD_PATH, "../functions/")
 using BP
 
