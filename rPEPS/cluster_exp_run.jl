@@ -208,7 +208,7 @@ end
 w_list = [4, 6, 8, 10]  # Available cluster weights
 N_list = [5, 10]    # Available system sizes  
 η_list = [0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1.0]  # η values
-nsamples = 1000      # Number of samples per combination
+nsamples = 10000      # Number of samples per combination
 
 # Get task ID from command line argument or environment variable
 task_id = nothing
