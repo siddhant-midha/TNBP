@@ -2087,7 +2087,7 @@ function ZCorrection4th(loopValue, dx, dy,messages,T,BPedges,BPlinks,BPadj_mat)
     for origin_y = 1:dy, origin_x = 1:dx
         loop_l = loop4th(origin_x,origin_y,dx,dy)
         for loop in loop_l
-            dZ += loopValue(graph_to_edge_list(loop),messages,T,BPedges,BPlinks,BPadj_mat)
+            dZ += scalar(loopValue(graph_to_edge_list(loop),messages,T,BPedges,BPlinks,BPadj_mat))
         end
     end
     return dZ
@@ -2098,7 +2098,7 @@ function ZCorrection6th(loopValue, dx, dy,messages,T,BPedges,BPlinks,BPadj_mat)
     for origin_y = 1:dy, origin_x = 1:dx
         loop_l = loop6th(origin_x, origin_y, dx, dy)
         for loop in loop_l
-            dZ += loopValue(graph_to_edge_list(loop),messages,T,BPedges,BPlinks,BPadj_mat)
+            dZ += scalar(loopValue(graph_to_edge_list(loop),messages,T,BPedges,BPlinks,BPadj_mat))
         end
     end
     return dZ
@@ -2109,7 +2109,7 @@ function ZCorrection7th(loopValue, dx, dy,messages,T,BPedges,BPlinks,BPadj_mat)
     for origin_y = 1:dy, origin_x = 1:dx
         loop_l = loop7th(origin_x, origin_y, dx, dy)
         for loop in loop_l
-            dZ += loopValue(graph_to_edge_list(loop),messages,T,BPedges,BPlinks,BPadj_mat)
+            dZ += scalar(loopValue(graph_to_edge_list(loop),messages,T,BPedges,BPlinks,BPadj_mat))
         end
     end
     return dZ
@@ -2122,7 +2122,7 @@ function ZCorrection8th(loopValue, dx, dy,messages,T,BPedges,BPlinks,BPadj_mat)
     for origin_y = 1:dy, origin_x = 1:dx
         loop_l = loop8th(origin_x, origin_y, dx, dy)
         for loop in loop_l
-            dZ += loopValue(graph_to_edge_list(loop),messages,T,BPedges,BPlinks,BPadj_mat)
+            dZ += scalar(loopValue(graph_to_edge_list(loop),messages,T,BPedges,BPlinks,BPadj_mat))
         end
     end
 
@@ -2140,8 +2140,8 @@ function ZCorrection8th(loopValue, dx, dy,messages,T,BPedges,BPlinks,BPadj_mat)
                     continue
                 end
 
-                dZ += loopValue(graph_to_edge_list(loop1),messages,T,BPedges,BPlinks,BPadj_mat) * 
-                      loopValue(graph_to_edge_list(loop2),messages,T,BPedges,BPlinks,BPadj_mat)
+                dZ += scalar(loopValue(graph_to_edge_list(loop1),messages,T,BPedges,BPlinks,BPadj_mat) * 
+                      loopValue(graph_to_edge_list(loop2),messages,T,BPedges,BPlinks,BPadj_mat))
             end
         end
     end
@@ -2153,7 +2153,7 @@ function ZCorrection9th(loopValue, dx, dy,messages,T,BPedges,BPlinks,BPadj_mat)
     for origin_y = 1:dy, origin_x = 1:dx
         loop_l = loop9th(origin_x, origin_y, dx, dy)
         for loop in loop_l
-            dZ += loopValue(graph_to_edge_list(loop),messages,T,BPedges,BPlinks,BPadj_mat)
+            dZ += scalar(loopValue(graph_to_edge_list(loop),messages,T,BPedges,BPlinks,BPadj_mat))
         end
     end
     return dZ
@@ -2166,7 +2166,7 @@ function ZCorrection10th(loopValue, dx, dy,messages,T,BPedges,BPlinks,BPadj_mat)
     for origin_y = 1:dy, origin_x = 1:dx
         loop_l = loop10th(origin_x, origin_y, dx, dy)
         for loop in loop_l
-            dZ += loopValue(graph_to_edge_list(loop),messages,T,BPedges,BPlinks,BPadj_mat)
+            dZ += scalar(loopValue(graph_to_edge_list(loop),messages,T,BPedges,BPlinks,BPadj_mat))
         end
     end
 
@@ -2184,8 +2184,8 @@ function ZCorrection10th(loopValue, dx, dy,messages,T,BPedges,BPlinks,BPadj_mat)
                     continue
                 end
 
-                dZ += loopValue(graph_to_edge_list(loop1),messages,T,BPedges,BPlinks,BPadj_mat) * 
-                      loopValue(graph_to_edge_list(loop2),messages,T,BPedges,BPlinks,BPadj_mat)
+                dZ += scalar(loopValue(graph_to_edge_list(loop1),messages,T,BPedges,BPlinks,BPadj_mat) * 
+                      loopValue(graph_to_edge_list(loop2),messages,T,BPedges,BPlinks,BPadj_mat))
             end
         end
     end
@@ -2200,7 +2200,7 @@ function logZCorrection4th(loopValue, dx, dy,messages,T,BPedges,BPlinks,BPadj_ma
     for origin_y = 1:dy, origin_x = 1:dx
         loop_l = loop4th(origin_x, origin_y, dx, dy)
         for loop in loop_l
-            dlogZ += loopValue(graph_to_edge_list(loop),messages,T,BPedges,BPlinks,BPadj_mat)
+            dlogZ += scalar(loopValue(graph_to_edge_list(loop),messages,T,BPedges,BPlinks,BPadj_mat))
         end
     end
     return dlogZ
@@ -2212,7 +2212,7 @@ function logZCorrection6th(loopValue, dx, dy,messages,T,BPedges,BPlinks,BPadj_ma
         loop_l = loop6th(origin_x, origin_y, dx, dy)
         for loop in loop_l
             
-            dlogZ += loopValue(graph_to_edge_list(loop),messages,T,BPedges,BPlinks,BPadj_mat)
+            dlogZ += scalar(loopValue(graph_to_edge_list(loop),messages,T,BPedges,BPlinks,BPadj_mat))
         end
     end
     return dlogZ
@@ -2223,7 +2223,7 @@ function logZCorrection7th(loopValue, dx, dy,messages,T,BPedges,BPlinks,BPadj_ma
     for origin_y = 1:dy, origin_x = 1:dx
         loop_l = loop7th(origin_x, origin_y, dx, dy)
         for loop in loop_l
-            dlogZ += loopValue(graph_to_edge_list(loop),messages,T,BPedges,BPlinks,BPadj_mat)
+            dlogZ += scalar(loopValue(graph_to_edge_list(loop),messages,T,BPedges,BPlinks,BPadj_mat))
         end
     end
     return dlogZ
@@ -2234,7 +2234,7 @@ function logZCorrection8th(loopValue, dx, dy,messages,T,BPedges,BPlinks,BPadj_ma
     for origin_y = 1:dy, origin_x = 1:dx
         loop_l = loop8th(origin_x, origin_y, dx, dy)
         for loop in loop_l
-            dlogZ += loopValue(graph_to_edge_list(loop),messages,T,BPedges,BPlinks,BPadj_mat)
+            dlogZ += scalar(loopValue(graph_to_edge_list(loop),messages,T,BPedges,BPlinks,BPadj_mat))
         end
     end
 
@@ -2252,8 +2252,8 @@ function logZCorrection8th(loopValue, dx, dy,messages,T,BPedges,BPlinks,BPadj_ma
                     continue
                 end
 
-                dlogZ -= loopValue(graph_to_edge_list(loop1),messages,T,BPedges,BPlinks,BPadj_mat) * 
-                         loopValue(graph_to_edge_list(loop2),messages,T,BPedges,BPlinks,BPadj_mat) / 2
+                dlogZ -= scalar(loopValue(graph_to_edge_list(loop1),messages,T,BPedges,BPlinks,BPadj_mat) * 
+                         loopValue(graph_to_edge_list(loop2),messages,T,BPedges,BPlinks,BPadj_mat) / 2)
             end
         end
     end
@@ -2265,7 +2265,7 @@ function logZCorrection9th(loopValue, dx, dy,messages,T,BPedges,BPlinks,BPadj_ma
     for origin_y = 1:dy, origin_x = 1:dx
         loop_l = loop9th(origin_x, origin_y, dx, dy)
         for loop in loop_l
-            dlogZ += loopValue(graph_to_edge_list(loop),messages,T,BPedges,BPlinks,BPadj_mat)
+            dlogZ += scalar(loopValue(graph_to_edge_list(loop),messages,T,BPedges,BPlinks,BPadj_mat))
         end
     end
     return dlogZ
@@ -2276,7 +2276,7 @@ function logZCorrection10th(loopValue, dx, dy,messages,T,BPedges,BPlinks,BPadj_m
     for origin_y = 1:dy, origin_x = 1:dx
         loop_l = loop10th(origin_x, origin_y, dx, dy)
         for loop in loop_l
-            dlogZ += loopValue(graph_to_edge_list(loop),messages,T,BPedges,BPlinks,BPadj_mat)
+            dlogZ += scalar(loopValue(graph_to_edge_list(loop),messages,T,BPedges,BPlinks,BPadj_mat))
         end
     end
 
@@ -2294,8 +2294,8 @@ function logZCorrection10th(loopValue, dx, dy,messages,T,BPedges,BPlinks,BPadj_m
                     continue
                 end
 
-                dlogZ -= loopValue(graph_to_edge_list(loop1),messages,T,BPedges,BPlinks,BPadj_mat) * 
-                         loopValue(graph_to_edge_list(loop2),messages,T,BPedges,BPlinks,BPadj_mat) / 2
+                dlogZ -= scalar(loopValue(graph_to_edge_list(loop1),messages,T,BPedges,BPlinks,BPadj_mat) * 
+                         loopValue(graph_to_edge_list(loop2),messages,T,BPedges,BPlinks,BPadj_mat) / 2)
             end
         end
     end
