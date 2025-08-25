@@ -63,7 +63,7 @@ function load_latest_single_site_cluster_file(; size_filter="L11", weight_filter
     Load the most recent single-site cluster enumeration file matching criteria.
     Returns the data and filename for reference.
     """
-    save_dir = "saved_clusters"
+    save_dir = "../saved_clusters"
     
     if !isdir(save_dir)
         error("No saved_clusters directory found!")
@@ -1057,7 +1057,7 @@ function main()
     println("="^80)
     
     # Parameters - automatically use L10 since we have single-site data for it
-    L = 11
+    L = 12
     β_range = collect(0.1:0.02:1.)  # β from 0.1 to 1.6 with fewer points for faster computation
     max_weights = [4, 6, 8, 10]  # Use available weights for L10 (we have w8 and w9)
     
