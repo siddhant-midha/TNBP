@@ -52,7 +52,10 @@ function site_to_coords(site::Int, L::Int)
 end
 
 function coords_to_site(i::Int, j::Int, L::Int)
-    """Convert (i, j) coordinates to 1-indexed site."""
+    """Convert (i, j) coordinates to 1-indexed site. Returns -1 for invalid coordinates."""
+    if i < 1 || i > L || j < 1 || j > L
+        return -1
+    end
     return (i - 1) * L + j
 end
 
@@ -182,20 +185,21 @@ function generate_all_loops_obc(center_loops::Vector{Loop}, L::Int)
     println("  Generated $(length(all_loops)) loops from $(length(center_loops)) center loops")
     println("  Discarded $discarded_count out-of-bounds translations")
     
-    # Deduplicate loops after translation
-    println("  🔧 Deduplicating translated loops...")
+    # For cluster enumeration, we want position-distinct loops, not geometrically canonical ones
+    # Only remove truly identical loops (same vertex sets), not geometrically equivalent ones
+    println("  🔧 Removing only identical loops (preserving position-distinct loops)...")
     unique_loops = Loop[]
-    seen_canonical = Set{Tuple{Vector{Int}, Vector{Tuple{Int,Int}}, Int}}()
+    seen_vertex_sets = Set{Vector{Int}}()
     
     for loop in all_loops
-        canonical = canonical_loop_representation(loop)
-        if !(canonical in seen_canonical)
-            push!(seen_canonical, canonical)
+        vertex_signature = sort(loop.vertices)  # Use actual vertices, not geometric pattern
+        if !(vertex_signature in seen_vertex_sets)
+            push!(seen_vertex_sets, vertex_signature)
             push!(unique_loops, loop)
         end
     end
     
-    println("  Final unique loops: $(length(unique_loops)) (removed $(length(all_loops) - length(unique_loops)) duplicates)")
+    println("  Final unique loops: $(length(unique_loops)) (removed $(length(all_loops) - length(unique_loops)) identical duplicates)")
     
     return unique_loops
 end
@@ -401,6 +405,154 @@ function create_coordinate_canonical_form(loop::Loop, L::Int = 11)
     return (normalized_coords, loop.weight)
 end
 
+function create_position_specific_cluster_signature(cluster::Cluster, all_loops::Vector{Loop})
+    """
+    Create a signature that identifies identical clusters (same loops at same positions).
+    Unlike geometric canonical forms, this preserves translation-distinct clusters as separate.
+    """
+    # Create signature based on actual loop IDs and their vertices (positions matter)
+    loop_signatures = []
+    
+    for loop_id in sort(collect(cluster.loop_ids))
+        loop = all_loops[loop_id]
+        multiplicity = cluster.multiplicities[loop_id]
+        
+        # Use actual vertex positions (not geometric pattern)
+        loop_sig = (sort(loop.vertices), loop.weight, multiplicity)
+        push!(loop_signatures, loop_sig)
+    end
+    
+    return (tuple(loop_signatures...), cluster.weight)
+end
+
+function apply_global_identical_deduplication(all_clusters::Vector{Cluster}, all_loops::Vector{Loop}, L::Int)
+    """
+    Remove only truly identical clusters (same loops at same positions).
+    Translation-related clusters are kept as distinct.
+    """
+    
+    println("  🔍 Removing identical clusters (preserving translation-distinct clusters)...")
+    
+    original_count = length(all_clusters)
+    unique_clusters = Cluster[]
+    seen_signatures = Set{Tuple}()
+    duplicates_removed = 0
+    
+    progress = Progress(original_count, dt=0.1, desc="Deduplicating: ", color=:yellow, barlen=50)
+    
+    for cluster in all_clusters
+        # Create position-specific signature
+        signature = create_position_specific_cluster_signature(cluster, all_loops)
+        
+        if !(signature in seen_signatures)
+            push!(seen_signatures, signature)
+            push!(unique_clusters, cluster)
+        else
+            duplicates_removed += 1
+        end
+        
+        next!(progress, showvalues = [("Unique", "$(length(unique_clusters))"), ("Duplicates", "$duplicates_removed")])
+    end
+    
+    finish!(progress)
+    
+    println("  ✅ Identical cluster deduplication complete:")
+    println("    Original clusters: $original_count")
+    println("    Unique clusters: $(length(unique_clusters))")
+    println("    Duplicates removed: $duplicates_removed")
+    
+    return unique_clusters
+end
+
+function rebuild_clusters_by_site_mapping(unique_clusters::Vector{Cluster}, all_loops::Vector{Loop}, n_sites::Int)
+    """
+    Rebuild the clusters_by_site mapping from the globally deduplicated cluster list.
+    Each cluster is assigned to all sites that any of its constituent loops touch.
+    """
+    
+    println("  🗺️  Rebuilding site-to-cluster mapping...")
+    
+    clusters_by_site = Dict{Int, Vector{Cluster}}()
+    
+    # Initialize empty vectors for all sites
+    for site in 1:n_sites
+        clusters_by_site[site] = Cluster[]
+    end
+    
+    progress = Progress(length(unique_clusters), dt=0.1, desc="Mapping clusters: ", color=:green, barlen=50)
+    
+    for cluster in unique_clusters
+        # Find all sites touched by any loop in this cluster
+        sites_touched = Set{Int}()
+        
+        for loop_id in cluster.loop_ids
+            loop = all_loops[loop_id]
+            for vertex in loop.vertices
+                push!(sites_touched, vertex)
+            end
+        end
+        
+        # Add this cluster to all sites it touches
+        for site in sites_touched
+            push!(clusters_by_site[site], cluster)
+        end
+        
+        next!(progress, showvalues = [("Cluster sites", "$(length(sites_touched))")])
+    end
+    
+    finish!(progress)
+    
+    total_assignments = sum(length(clusters) for clusters in values(clusters_by_site))
+    println("  ✅ Rebuilt mapping: $(length(unique_clusters)) unique clusters → $total_assignments site assignments")
+    
+    return clusters_by_site
+end
+
+function save_cluster_enumeration_with_unique_count(data::ClusterEnumerationData, prefix::String, unique_count::Int)
+    """Save cluster enumeration data with corrected unique cluster count in summary."""
+    
+    # Create directory if it doesn't exist
+    save_dir = "saved_clusters"
+    if !isdir(save_dir)
+        mkpath(save_dir)
+        println("📁 Created directory: $save_dir")
+    end
+    
+    # Generate filename
+    base_name = "clusters_L$(data.lattice_size)_w$(data.max_weight)"
+    if !isempty(prefix)
+        base_name = "$(prefix)_$(base_name)"
+    end
+    
+    filepath = joinpath(save_dir, "$(base_name).jld2")
+    
+    println("💾 Saving enumeration data to: $(filepath)")
+    
+    # Create summary with corrected unique cluster count
+    summary = Dict(
+        "lattice_size" => data.lattice_size,
+        "total_sites" => data.total_sites,
+        "max_weight" => data.max_weight,
+        "total_loops" => length(data.all_loops),
+        "total_clusters" => unique_count,  # Use unique count, not site assignments
+        "enumeration_time_seconds" => data.enumeration_time,
+        "timestamp" => data.timestamp
+    )
+    
+    # Save both data and corrected summary
+    save_data = Dict(
+        "data" => data,
+        "summary" => summary
+    )
+    
+    open(filepath, "w") do io
+        serialize(io, save_data)
+    end
+    
+    println("✅ Saved successfully!")
+    println("   Summary: $summary")
+end
+
 function apply_position_aware_cluster_deduplication(clusters_by_site::Dict{Int, Vector{Cluster}}, all_loops::Vector{Loop}, L::Int)
     """
     Custom deduplication that removes only identical clusters at the same site,
@@ -558,12 +710,14 @@ function main()
         println("\n🔗 Step 3: Building interaction graph and enumerating clusters...")
         interaction_graph = build_interaction_graph_optimized(all_loops)
         
-        # Enumerate clusters for each site (following one_site_old.jl pattern)
-        clusters_by_site = Dict{Int, Vector{Cluster}}()
+        # Generate all possible clusters globally to avoid cross-site duplicates
         n_sites = L * L
         
-        println("  Processing $(n_sites) sites...")
+        println("  Processing $(n_sites) sites to collect all clusters...")
         site_progress = Progress(n_sites, dt=0.1, desc="Sites processed: ", color=:cyan, barlen=50)
+        
+        # Collect all clusters from all sites into one global list
+        all_clusters = Cluster[]
         
         for site in 1:n_sites
             # Find loops supported on this site
@@ -578,11 +732,10 @@ function main()
                 # Enumerate clusters for this site
                 site_clusters = dfs_enumerate_clusters_from_supported(all_loops, supported_loop_ids, 
                                                                     max_weight, interaction_graph)
-                # Remove redundancies
-                unique_clusters = remove_cluster_redundancies(site_clusters)
-                clusters_by_site[site] = unique_clusters
-            else
-                clusters_by_site[site] = Cluster[]
+                # Remove local redundancies
+                unique_site_clusters = remove_cluster_redundancies(site_clusters)
+                # Add to global collection
+                append!(all_clusters, unique_site_clusters)
             end
             
             next!(site_progress)
@@ -590,9 +743,15 @@ function main()
         
         finish!(site_progress)
         
-        # Step 3.5: Apply position-aware deduplication
-        println("\n🔧 Step 3.5: Position-aware deduplication...")
-        clusters_by_site = apply_position_aware_cluster_deduplication(clusters_by_site, all_loops, L)
+        println("  Collected $(length(all_clusters)) clusters before global deduplication")
+        
+        # Step 3.5: Apply global identical deduplication (preserve translation-distinct clusters)
+        println("\n🔧 Step 3.5: Global identical deduplication...")
+        unique_global_clusters = apply_global_identical_deduplication(all_clusters, all_loops, L)
+        
+        # Step 3.6: Rebuild clusters_by_site mapping
+        println("\n🗺️  Step 3.6: Rebuilding site-to-cluster mapping...")
+        clusters_by_site = rebuild_clusters_by_site_mapping(unique_global_clusters, all_loops, n_sites)
         
         # Step 4: Create data structure and save
         println("\n💾 Step 4: Creating data structure and saving...")
@@ -609,11 +768,12 @@ function main()
             n_sites
         )
         
-        # Save results (temporarily change to parent directory to save in correct location)
+        # Save results with corrected unique cluster count
         original_dir = pwd()
         cd("..")
         try
-            save_cluster_enumeration(data, full_prefix)
+            # Save with custom summary that shows unique clusters
+            save_cluster_enumeration_with_unique_count(data, full_prefix, length(unique_global_clusters))
         finally
             cd(original_dir)
         end
@@ -628,7 +788,7 @@ function main()
         stats_progress = Progress(3, dt=0.2, desc="Final analysis: ", color=:cyan)
         
         next!(stats_progress, showvalues = [("Task", "Counting clusters")])
-        total_clusters = sum(length(clusters) for clusters in values(data.clusters_by_site))
+        total_clusters = length(unique_global_clusters)  # Count unique clusters, not site assignments
         
         next!(stats_progress, showvalues = [("Task", "Computing averages")])
         # Give time for the progress bar to show
@@ -666,10 +826,8 @@ function main()
         
         next!(analysis_progress, showvalues = [("Task", "Grouping by weight")])
         by_weight = Dict{Int, Int}()
-        for clusters in values(data.clusters_by_site)
-            for cluster in clusters
-                by_weight[cluster.weight] = get(by_weight, cluster.weight, 0) + 1
-            end
+        for cluster in unique_global_clusters
+            by_weight[cluster.weight] = get(by_weight, cluster.weight, 0) + 1
         end
         
         next!(analysis_progress, showvalues = [("Task", "Generating summary")])
