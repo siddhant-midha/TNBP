@@ -925,7 +925,34 @@ function plot_free_energy_vs_beta_with_single_site_clusters_efficient(L::Int, β
         savefig(p, save_path)
     end
     
-    return p
+    # Create error plot showing absolute differences from exact solution
+    println("\n📊 Creating error plot showing absolute differences from exact solution...")
+    p_error = plot(title="Absolute Error vs β (Distance from Exact Onsager Solution)", 
+                   xlabel="β", ylabel="Absolute Error |f - f_exact|",
+                   legend=:topright, size=(800, 600),
+                   dpi=300, yscale=:log10)
+    
+    # Plot BP error
+    bp_error = abs.(bp_f .- exact_f)
+    plot!(p_error, β_range, bp_error, linewidth=2, color=:gray, 
+          label="BP (no corrections)", linestyle=:dot)
+    
+    # Plot cluster expansion errors for each weight
+    for (i, max_weight) in enumerate(max_weights)
+        cluster_error = abs.(cluster_f_dict[max_weight] .- exact_f)
+        color = colors[min(i, length(colors))]
+        plot!(p_error, β_range, cluster_error, linewidth=2, color=color,
+              label="Weight ≤ $max_weight", linestyle=:dash)
+    end
+    
+    # Save error plot
+    if !isempty(save_path)
+        error_save_path = replace(save_path, ".png" => "_errors.png")
+        println("💾 Saving error plot to: $error_save_path")
+        savefig(p_error, error_save_path)
+    end
+    
+    return p, p_error
 end
 
 # Plot free energy vs beta using single-site clusters
@@ -1030,9 +1057,9 @@ function main()
     println("="^80)
     
     # Parameters - automatically use L10 since we have single-site data for it
-    L = 10
-    β_range = collect(0.1:0.05:1.)  # β from 0.1 to 1.6 with fewer points for faster computation
-    max_weights = [4, 6, 8]  # Use available weights for L10 (we have w8 and w9)
+    L = 11
+    β_range = collect(0.1:0.02:1.)  # β from 0.1 to 1.6 with fewer points for faster computation
+    max_weights = [4, 6, 8, 10]  # Use available weights for L10 (we have w8 and w9)
     
     println("📋 Configuration:")
     println("   Lattice size: $(L)×$(L)")
@@ -1042,13 +1069,15 @@ function main()
     
     # Create plot using efficient single-site clusters
     save_path = "visualization/cluster_expansion_free_energy_L$(L)_single_site_efficient.png"
-    plot_obj = plot_free_energy_vs_beta_with_single_site_clusters_efficient(L, β_range, max_weights; save_path=save_path)
+    plot_obj, error_plot_obj = plot_free_energy_vs_beta_with_single_site_clusters_efficient(L, β_range, max_weights; save_path=save_path)
     
     # Display final results
     println("\n✅ Analysis complete!")
-    println("📊 Plot saved to: $save_path")
+    println("📊 Free energy plot saved to: $save_path")
+    error_save_path = replace(save_path, ".png" => "_errors.png")
+    println("📊 Error plot saved to: $error_save_path")
     
-    return plot_obj
+    return plot_obj, error_plot_obj
 end
 
 # Run if executed directly
