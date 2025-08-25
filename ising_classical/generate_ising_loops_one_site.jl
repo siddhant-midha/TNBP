@@ -305,9 +305,8 @@ function save_single_site_loop_data(data::SingleSiteLoopData, prefix::String = "
         println("📁 Created directory: $save_dir")
     end
     
-    # Generate filename
-    timestamp = replace(data.timestamp, ":" => "-", "." => "-")
-    base_name = "single_site_loops_L$(data.lattice_size)_site$(data.site)_w$(data.max_weight)_$(data.boundary_condition)_$(timestamp)"
+    # Generate filename without timestamp
+    base_name = "single_site_loops_L$(data.lattice_size)_site$(data.site)_w$(data.max_weight)_$(data.boundary_condition)"
     if !isempty(prefix)
         base_name = "$(prefix)_$(base_name)"
     end

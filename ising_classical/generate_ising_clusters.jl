@@ -56,7 +56,7 @@ function coords_to_site(i::Int, j::Int, L::Int)
     return (i - 1) * L + j
 end
 
-function translate_site(site::Int, di::Int, dj::Int, L::Int)
+function translate_site_periodic(site::Int, di::Int, dj::Int, L::Int)
     """Translate a site by (di, dj) on an L×L periodic lattice."""
     i, j = site_to_coords(site, L)
     
@@ -67,11 +67,33 @@ function translate_site(site::Int, di::Int, dj::Int, L::Int)
     return coords_to_site(new_i, new_j, L)
 end
 
-function translate_loop(loop::Loop, di::Int, dj::Int, L::Int)
-    """Translate a loop by (di, dj) and return the translated loop."""
+function translate_site_open(site::Int, di::Int, dj::Int, L::Int)
+    """Translate a site by (di, dj) on an L×L open lattice."""
+    i, j = site_to_coords(site, L)
+    
+    # Apply translation without wrapping
+    new_i = i + di
+    new_j = j + dj
+    
+    return coords_to_site(new_i, new_j, L)
+end
+
+function translate_loop_periodic(loop::Loop, di::Int, dj::Int, L::Int)
+    """Translate a loop by (di, dj) with periodic boundary conditions."""
     # Translate all vertices in the loop
-    translated_vertices = [translate_site(v, di, dj, L) for v in loop.vertices]
-    translated_edges = [(translate_site(u, di, dj, L), translate_site(v, di, dj, L)) for (u, v) in loop.edges]
+    translated_vertices = [translate_site_periodic(v, di, dj, L) for v in loop.vertices]
+    translated_edges = [(translate_site_periodic(u, di, dj, L), translate_site_periodic(v, di, dj, L)) for (u, v) in loop.edges]
+    
+    # Create canonical representation
+    translated_loop = Loop(sort(translated_vertices), sort([(min(u,v), max(u,v)) for (u,v) in translated_edges]), loop.weight)
+    return translated_loop
+end
+
+function translate_loop_open(loop::Loop, di::Int, dj::Int, L::Int)
+    """Translate a loop by (di, dj) with open boundary conditions."""
+    # Translate all vertices in the loop
+    translated_vertices = [translate_site_open(v, di, dj, L) for v in loop.vertices]
+    translated_edges = [(translate_site_open(u, di, dj, L), translate_site_open(v, di, dj, L)) for (u, v) in loop.edges]
     
     # Create canonical representation
     translated_loop = Loop(sort(translated_vertices), sort([(min(u,v), max(u,v)) for (u,v) in translated_edges]), loop.weight)
@@ -79,8 +101,19 @@ function translate_loop(loop::Loop, di::Int, dj::Int, L::Int)
 end
 
 function is_loop_within_bounds(loop::Loop, L::Int)
-    """Check if all vertices of a loop are within [1, L²] bounds."""
-    return all(1 <= v <= L*L for v in loop.vertices)
+    """Check if all vertices of a loop are within [1, L²] bounds and valid coordinates."""
+    for v in loop.vertices
+        if v < 1 || v > L*L
+            return false
+        end
+        
+        # Also check if coordinates are valid (not negative due to translation)
+        i, j = site_to_coords(v, L)
+        if i < 1 || i > L || j < 1 || j > L
+            return false
+        end
+    end
+    return true
 end
 
 function generate_all_loops_pbc(center_loops::Vector{Loop}, L::Int)
@@ -95,7 +128,7 @@ function generate_all_loops_pbc(center_loops::Vector{Loop}, L::Int)
     for di in 0:(L-1)
         for dj in 0:(L-1)
             for loop in center_loops
-                translated_loop = translate_loop(loop, di, dj, L)
+                translated_loop = translate_loop_periodic(loop, di, dj, L)
                 canonical = canonical_loop_representation(translated_loop)
                 
                 if !(canonical in seen_loops)
@@ -124,10 +157,10 @@ function generate_all_loops_obc(center_loops::Vector{Loop}, L::Int)
     
     discarded_count = 0
     
-    for di in 0:(L-1)
-        for dj in 0:(L-1)
+    for di in -(L):(L)
+        for dj in -(L):(L)
             for loop in center_loops
-                translated_loop = translate_loop(loop, di, dj, L)
+                translated_loop = translate_loop_open(loop, di, dj, L)
                 
                 # Check if translated loop is within bounds
                 if is_loop_within_bounds(translated_loop, L)
@@ -146,10 +179,25 @@ function generate_all_loops_obc(center_loops::Vector{Loop}, L::Int)
     end
     
     finish!(progress)
-    println("  Generated $(length(all_loops)) unique loops from $(length(center_loops)) center loops")
+    println("  Generated $(length(all_loops)) loops from $(length(center_loops)) center loops")
     println("  Discarded $discarded_count out-of-bounds translations")
     
-    return all_loops
+    # Deduplicate loops after translation
+    println("  🔧 Deduplicating translated loops...")
+    unique_loops = Loop[]
+    seen_canonical = Set{Tuple{Vector{Int}, Vector{Tuple{Int,Int}}, Int}}()
+    
+    for loop in all_loops
+        canonical = canonical_loop_representation(loop)
+        if !(canonical in seen_canonical)
+            push!(seen_canonical, canonical)
+            push!(unique_loops, loop)
+        end
+    end
+    
+    println("  Final unique loops: $(length(unique_loops)) (removed $(length(all_loops) - length(unique_loops)) duplicates)")
+    
+    return unique_loops
 end
 
 
@@ -353,93 +401,51 @@ function create_coordinate_canonical_form(loop::Loop, L::Int = 11)
     return (normalized_coords, loop.weight)
 end
 
-function apply_global_cluster_deduplication(clusters_by_site::Dict{Int, Vector{Cluster}}, all_loops::Vector{Loop}, L::Int)
+function apply_position_aware_cluster_deduplication(clusters_by_site::Dict{Int, Vector{Cluster}}, all_loops::Vector{Loop}, L::Int)
     """
-    Remove cluster duplicates across all sites using canonical signatures.
-    This handles cases where the same cluster pattern appears multiple times
-    due to loop enumeration creating equivalent loops with different IDs.
+    Custom deduplication that removes only identical clusters at the same site,
+    but keeps clusters at different positions as distinct.
     """
     
-    println("  🔍 Analyzing cluster duplicates...")
+    println("  🔍 Applying position-aware deduplication...")
     
-    # Collect all clusters with their sites
-    all_clusters_with_sites = []
-    original_total = 0
-    
-    for (site, clusters) in clusters_by_site
-        original_total += length(clusters)
-        for cluster in clusters
-            push!(all_clusters_with_sites, (site, cluster))
-        end
-    end
-    
-    println("  📊 Processing $(length(all_clusters_with_sites)) total clusters from $original_total site assignments")
-    
-    # Group by canonical cluster signature (using loop canonical forms)
-    canonical_groups = Dict{Tuple, Vector{Tuple{Int, Cluster}}}()
-    
-    progress = Progress(length(all_clusters_with_sites), dt=0.1, desc="  Creating canonical signatures: ", color=:yellow, barlen=40)
-    
-    for (site, cluster) in all_clusters_with_sites
-        # Create signature using canonical loop representations
-        canonical_sig = create_canonical_cluster_signature(cluster, all_loops, L)
-        
-        if !haskey(canonical_groups, canonical_sig)
-            canonical_groups[canonical_sig] = []
-        end
-        push!(canonical_groups[canonical_sig], (site, cluster))
-        
-        next!(progress)
-    end
-    
-    finish!(progress)
-    
-    println("  📊 Found $(length(canonical_groups)) unique canonical cluster forms")
-    
-    # For each canonical group, place one copy on each site where it appears
+    original_total = sum(length(clusters) for clusters in values(clusters_by_site))
     deduplicated_clusters_by_site = Dict{Int, Vector{Cluster}}()
-    for site in 1:(L*L)
-        deduplicated_clusters_by_site[site] = []
-    end
-    
-    dedup_progress = Progress(length(canonical_groups), dt=0.1, desc="  Deduplicating: ", color=:yellow, barlen=40)
-    
     total_duplicates_removed = 0
     
-    for (canonical_sig, site_cluster_pairs) in canonical_groups
-        # Group by site to see how many copies appear on each site
-        clusters_by_site_for_this_canonical = Dict{Int, Vector{Cluster}}()
-        for (site, cluster) in site_cluster_pairs
-            if !haskey(clusters_by_site_for_this_canonical, site)
-                clusters_by_site_for_this_canonical[site] = []
-            end
-            push!(clusters_by_site_for_this_canonical[site], cluster)
+    for (site, clusters) in clusters_by_site
+        if isempty(clusters)
+            deduplicated_clusters_by_site[site] = []
+            continue
         end
         
-        # For each site, keep only one copy (remove duplicates)
-        for (site, clusters_on_site) in clusters_by_site_for_this_canonical
-            # Keep only the first cluster (they're all equivalent)
-            representative_cluster = clusters_on_site[1]
-            push!(deduplicated_clusters_by_site[site], representative_cluster)
+        # For each site, remove only identical clusters (same loop composition)
+        unique_clusters_at_site = []
+        seen_signatures = Set{Tuple}()
+        
+        for cluster in clusters
+            # Create signature based on actual loop IDs and multiplicities at this site
+            signature = (sort(collect(cluster.loop_ids)), 
+                        [cluster.multiplicities[id] for id in sort(collect(cluster.loop_ids))],
+                        cluster.weight)
             
-            # Count how many duplicates we removed from this site
-            duplicates_removed_from_site = length(clusters_on_site) - 1
-            total_duplicates_removed += duplicates_removed_from_site
+            if !(signature in seen_signatures)
+                push!(seen_signatures, signature)
+                push!(unique_clusters_at_site, cluster)
+            else
+                total_duplicates_removed += 1
+            end
         end
         
-        next!(dedup_progress)
+        deduplicated_clusters_by_site[site] = unique_clusters_at_site
     end
     
-    finish!(dedup_progress)
-    
-    # Calculate final statistics
     final_total = sum(length(clusters) for clusters in values(deduplicated_clusters_by_site))
     
-    println("  ✅ Deduplication complete:")
+    println("  ✅ Position-aware deduplication complete:")
     println("    Original clusters: $original_total")
     println("    Final clusters: $final_total") 
-    println("    Duplicates removed: $(original_total - final_total)")
-    println("    Unique canonical forms: $(length(canonical_groups))")
+    println("    Duplicates removed: $total_duplicates_removed")
     
     return deduplicated_clusters_by_site
 end
@@ -452,7 +458,7 @@ function main()
     
     # Handle special actions
     if args["list"]
-        list_saved_cluster_files()
+        list_saved_cluster_files("../saved_clusters")
         return
     end
     
@@ -460,7 +466,7 @@ function main()
         filepath = args["analyze"]
         if !isfile(filepath)
             # Try looking in saved_clusters directory
-            filepath = joinpath("saved_clusters", filepath)
+            filepath = joinpath("../saved_clusters", filepath)
             if !isfile(filepath)
                 println("❌ File not found: $(args["analyze"])")
                 return
@@ -584,9 +590,9 @@ function main()
         
         finish!(site_progress)
         
-        # Step 3.5: Global cluster deduplication across all sites
-        println("\n🔧 Step 3.5: Global cluster deduplication...")
-        clusters_by_site = apply_global_cluster_deduplication(clusters_by_site, all_loops, L)
+        # Step 3.5: Apply position-aware deduplication
+        println("\n🔧 Step 3.5: Position-aware deduplication...")
+        clusters_by_site = apply_position_aware_cluster_deduplication(clusters_by_site, all_loops, L)
         
         # Step 4: Create data structure and save
         println("\n💾 Step 4: Creating data structure and saving...")
@@ -603,8 +609,14 @@ function main()
             n_sites
         )
         
-        # Save results
-        save_cluster_enumeration(data, full_prefix)
+        # Save results (temporarily change to parent directory to save in correct location)
+        original_dir = pwd()
+        cd("..")
+        try
+            save_cluster_enumeration(data, full_prefix)
+        finally
+            cd(original_dir)
+        end
         
         println("\n✅ Core enumeration completed!")
         
@@ -636,7 +648,7 @@ function main()
         file_progress = Progress(2, dt=0.2, desc="Locating files: ", color=:magenta)
         
         next!(file_progress, showvalues = [("Task", "Scanning directory")])
-        save_dir = "saved_clusters"
+        save_dir = "../saved_clusters"
         files = filter(f -> startswith(f, full_prefix) && endswith(f, ".jld2"), 
                       readdir(save_dir; join=false))
         
@@ -667,6 +679,10 @@ function main()
             count = by_weight[weight]
             println("  Weight $weight: $count clusters")
         end
+        
+        # Show specific count for max weight
+        max_weight_count = get(by_weight, max_weight, 0)
+        println("\n📌 Weight-$max_weight clusters: $max_weight_count")
         
     catch e
         println("\n❌ ERROR during enumeration:")
@@ -701,7 +717,7 @@ function show_examples()
     println("   julia generate_ising_clusters.jl --list")
     println()
     println("4. Analyze a saved file:")
-    println("   julia generate_ising_clusters.jl --analyze saved_clusters/periodic_clusters_L6_w4_*.jld2")
+    println("   julia generate_ising_clusters.jl --analyze ../saved_clusters/periodic_clusters_L6_w4_*.jld2")
     println()
 end
 

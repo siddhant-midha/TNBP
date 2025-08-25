@@ -929,9 +929,8 @@ function save_cluster_enumeration(data::ClusterEnumerationData, prefix::String =
         println("📁 Created directory: $save_dir")
     end
     
-    # Generate filename
-    timestamp = replace(data.timestamp, ":" => "-", "." => "-")
-    base_name = "clusters_L$(data.lattice_size)_w$(data.max_weight)_$(timestamp)"
+    # Generate filename without timestamp
+    base_name = "clusters_L$(data.lattice_size)_w$(data.max_weight)"
     if !isempty(prefix)
         base_name = "$(prefix)_$(base_name)"
     end

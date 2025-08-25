@@ -312,16 +312,15 @@ end
 function save_single_site_cluster_data(data::SingleSiteClusterData, prefix::String = "")
     """Save single-site cluster enumeration data to file."""
     
-    # Create directory if it doesn't exist
-    save_dir = "saved_clusters"
+    # Create directory if it doesn't exist (save to parent directory like generate_ising_clusters.jl)
+    save_dir = "../saved_clusters"
     if !isdir(save_dir)
         mkpath(save_dir)
         println("📁 Created directory: $save_dir")
     end
     
-    # Generate filename
-    timestamp = replace(data.timestamp, ":" => "-", "." => "-")
-    base_name = "single_site_clusters_L$(data.lattice_size)_site$(data.site)_w$(data.max_weight)_periodic_$(timestamp)"
+    # Generate filename without timestamp
+    base_name = "single_site_clusters_L$(data.lattice_size)_site$(data.site)_w$(data.max_weight)_periodic"
     if !isempty(prefix)
         base_name = "$(prefix)_$(base_name)"
     end
@@ -372,7 +371,7 @@ function main()
     
     # Handle special actions
     if args["list"]
-        list_saved_cluster_files()
+        list_saved_cluster_files("../saved_clusters")
         return
     end
     
@@ -380,7 +379,7 @@ function main()
         filepath = args["analyze"]
         if !isfile(filepath)
             # Try looking in saved_clusters directory
-            filepath = joinpath("saved_clusters", filepath)
+            filepath = joinpath("../saved_clusters", filepath)
             if !isfile(filepath)
                 println("❌ File not found: $(args["analyze"])")
                 return

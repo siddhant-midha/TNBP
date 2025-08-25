@@ -1068,7 +1068,7 @@ function main()
     println("   Using EFFICIENT computation: load once, compute once per β")
     
     # Create plot using efficient single-site clusters
-    save_path = "visualization/cluster_expansion_free_energy_L$(L)_single_site_efficient.png"
+    save_path = "../visualization/cluster_expansion_free_energy_L$(L)_single_site_efficient.png"
     plot_obj, error_plot_obj = plot_free_energy_vs_beta_with_single_site_clusters_efficient(L, β_range, max_weights; save_path=save_path)
     
     # Display final results
