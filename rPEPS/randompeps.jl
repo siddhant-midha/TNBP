@@ -10,7 +10,7 @@ using BP
 
 function load_latest_cluster_file(N,w)
     """Load the most recent cluster enumeration file."""
-    save_dir = "saved_clusters"
+    save_dir = "../saved_clusters"
     
     if !isdir(save_dir)
         error("No saved_clusters directory found!")

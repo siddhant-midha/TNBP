@@ -508,8 +508,8 @@ function rebuild_clusters_by_site_mapping(unique_clusters::Vector{Cluster}, all_
     return clusters_by_site
 end
 
-function save_cluster_enumeration_with_unique_count(data::ClusterEnumerationData, prefix::String, unique_count::Int)
-    """Save cluster enumeration data with corrected unique cluster count in summary."""
+function save_cluster_enumeration_with_unique_count(data::ClusterEnumerationData, prefix::String, unique_count::Int, unique_global_clusters::Vector{Cluster})
+    """Save cluster enumeration data with corrected unique cluster count and unique global clusters."""
     
     # Create directory if it doesn't exist
     save_dir = "saved_clusters"
@@ -542,7 +542,8 @@ function save_cluster_enumeration_with_unique_count(data::ClusterEnumerationData
     # Save both data and corrected summary
     save_data = Dict(
         "data" => data,
-        "summary" => summary
+        "summary" => summary,
+        "unique_global_clusters" => unique_global_clusters
     )
     
     open(filepath, "w") do io
@@ -551,6 +552,8 @@ function save_cluster_enumeration_with_unique_count(data::ClusterEnumerationData
     
     println("✅ Saved successfully!")
     println("   Summary: $summary")
+    println("   💾 Additional data saved:")
+    println("     • unique_global_clusters: $(length(unique_global_clusters)) unique clusters")
 end
 
 function apply_position_aware_cluster_deduplication(clusters_by_site::Dict{Int, Vector{Cluster}}, all_loops::Vector{Loop}, L::Int)
@@ -768,12 +771,13 @@ function main()
             n_sites
         )
         
-        # Save results with corrected unique cluster count
+        # Save results with corrected unique cluster count and unique global clusters
+        # This saves both the standard ClusterEnumerationData and the unique_global_clusters
         original_dir = pwd()
         cd("..")
         try
             # Save with custom summary that shows unique clusters
-            save_cluster_enumeration_with_unique_count(data, full_prefix, length(unique_global_clusters))
+            save_cluster_enumeration_with_unique_count(data, full_prefix, length(unique_global_clusters), unique_global_clusters)
         finally
             cd(original_dir)
         end
@@ -859,6 +863,7 @@ function main()
     println("  • Use --list to see all saved files")
     println("  • Use --analyze <filename> to analyze results")
     println("  • Load data in Julia with: load_cluster_enumeration(\"path/to/file.jld2\")")
+    println("  • Access unique global clusters: saved_data[\"unique_global_clusters\"]")
 end
 
 function show_examples()
@@ -876,6 +881,10 @@ function show_examples()
     println()
     println("4. Analyze a saved file:")
     println("   julia generate_ising_clusters.jl --analyze ../saved_clusters/periodic_clusters_L6_w4_*.jld2")
+    println()
+    println("5. Load and access unique global clusters in Julia:")
+    println("   saved_data = load_cluster_enumeration(\"path/to/file.jld2\")")
+    println("   unique_clusters = saved_data[\"unique_global_clusters\"]")
     println()
 end
 
