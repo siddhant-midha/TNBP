@@ -2,6 +2,7 @@
 ClusterEnumeration.jl
 
 Julia implementation for enumerating connected clusters of loops.
+    Replaced with simpler Ursell function for safety
 """
 
 include("LoopEnumeration.jl")
@@ -557,44 +558,44 @@ function translation_aware_cluster_signature(cluster::Cluster, all_loops::Vector
     
     return (tuple(canonical_loop_sigs...), cluster.weight)
 end
-
-function ursell_function(cluster::Cluster, all_loops::Vector{Loop})
-    """
-    Compute the Ursell function φ(W) for a given cluster W.
+# COMMENTING OUT FOR SAFETY
+# function ursell_function(cluster::Cluster, all_loops::Vector{Loop})
+#     """
+#     Compute the Ursell function φ(W) for a given cluster W.
     
-    According to the polymer proof:
-    - φ(W) = 0 if the cluster is disconnected
-    - φ(W) = (1/W!) * Σ_{C connected subgraphs of G_W} (-1)^{|E(C)|} if connected
+#     According to the polymer proof:
+#     - φ(W) = 0 if the cluster is disconnected
+#     - φ(W) = (1/W!) * Σ_{C connected subgraphs of G_W} (-1)^{|E(C)|} if connected
     
-    Args:
-        cluster: The cluster W = {(l_i, η_i)} 
-        all_loops: Vector of all loops to build interaction graph
+#     Args:
+#         cluster: The cluster W = {(l_i, η_i)} 
+#         all_loops: Vector of all loops to build interaction graph
     
-    Returns:
-        Float64: The Ursell function value
-    """
+#     Returns:
+#         Float64: The Ursell function value
+#     """
     
-    # Check if cluster is connected using existing function
-    interaction_graph = build_interaction_graph(all_loops)
+#     # Check if cluster is connected using existing function
+#     interaction_graph = build_interaction_graph(all_loops)
     
-    if !is_cluster_connected(cluster, interaction_graph)
-        return 0.0  # Disconnected clusters have Ursell function = 0
-    end
+#     if !is_cluster_connected(cluster, interaction_graph)
+#         return 0.0  # Disconnected clusters have Ursell function = 0
+#     end
     
-    # For connected clusters, compute the sum over connected subgraphs
-    cluster_interaction_graph = build_cluster_interaction_graph(cluster, all_loops)
+#     # For connected clusters, compute the sum over connected subgraphs
+#     cluster_interaction_graph = build_cluster_interaction_graph(cluster, all_loops)
     
-    # Compute 1/W! where W! = ∏_i η_i!
-    w_factorial = 1.0
-    for multiplicity in values(cluster.multiplicities)
-        w_factorial *= factorial(multiplicity)
-    end
+#     # Compute 1/W! where W! = ∏_i η_i!
+#     w_factorial = 1.0
+#     for multiplicity in values(cluster.multiplicities)
+#         w_factorial *= factorial(multiplicity)
+#     end
     
-    # Sum over all connected subgraphs of the cluster interaction graph
-    subgraph_sum = sum_over_connected_subgraphs(cluster_interaction_graph)
+#     # Sum over all connected subgraphs of the cluster interaction graph
+#     subgraph_sum = sum_over_connected_subgraphs(cluster_interaction_graph)
     
-    return subgraph_sum / w_factorial
-end
+#     return subgraph_sum / w_factorial
+# end
 
 function build_cluster_interaction_graph(cluster::Cluster, all_loops::Vector{Loop})
     """
@@ -1098,4 +1099,94 @@ function analyze_saved_enumeration(data::ClusterEnumerationData)
     return nothing
 end
 
+
+## centralizing things
+ 
+
+# Ursell function for connected clusters (from original implementation)
+function ursell_function(cluster::Cluster, all_loops::Vector{Loop})
+    """
+    Compute the Ursell function φ(W) for a connected cluster W.
+    For connected clusters, this is (-1)^(|W|-1) * (|W|-1)!
+    where |W| is the total number of loops in the cluster (with multiplicities).
+    """
+    total_loops = cluster.total_loops
+    if total_loops == 1
+        return 1.0
+    else
+        return -0.5
+    end
+end
+
+function cluster_contr(T_normalized, messages, edges, links, adj_mat, cluster, all_loops)
+    # Compute Ursell function φ(W)
+    phi_W = ursell_function(cluster, all_loops)
+    
+    # if abs(phi_W) < 1e-15
+    #     return 0.0  # Skip negligible contributions
+    # end
+    
+    # Compute cluster correction Z_W = ∏_i Z_{l_i}^{η_i}
+    Z_W = 1.0 + 0im  # Complex number for cluster contribution
+    # invalidloop = false 
+    for loop_id in cluster.loop_ids
+        multiplicity = cluster.multiplicities[loop_id]
+        loop = all_loops[loop_id]
+        
+        # Convert loop edges format for BP.jl (ensure v1 < v2 ordering)
+        loop_edges_bp = Tuple{Int,Int}[]
+        for edge in loop.edges
+            v1, v2 = edge
+            push!(loop_edges_bp, (min(v1, v2), max(v1, v2)))
+        end
+        
+        # Compute loop contribution Z_l using BP
+        try
+            Z_l_tensor = BP.loop_contribution(loop_edges_bp, messages, T_normalized, edges, links, adj_mat)
+            # Extract scalar value from ITensor
+            Z_l = scalar(Z_l_tensor)
+            Z_W *= Z_l^multiplicity
+        catch e
+            # println("⚠️  Error computing loop contribution for loop $loop_id: $e")
+            # println("invalid loops present...", !(all([e in edges for e in loop_edges_bp])))
+            return 0.0  # Return 0 instead of breaking
+        end
+    end
+    
+    # Contribution to log partition function (not free energy)
+    # According to polymer theory: log(Z) = log(Z_BP) + Σ φ(W) Z_W
+    contribution = phi_W * Z_W 
+    return contribution
+end 
+
+function cluster_contr_by_site(cluster_data, TN_normalized, messages, edges, links, adj_mat)
+    all_loops = cluster_data.all_loops  
+    clusters_by_site = cluster_data.clusters_by_site
+
+    clustercorrx = 0.0 + 0.0im  # Start with complex number
+
+    # Deduplicate clusters manually (we know Set doesn't work)
+    clusters_by_signature = Dict{Tuple, Vector{Tuple{Int, Cluster}}}()
+
+    for site in 1:length(TN_normalized)
+        clusters = clusters_by_site[site]
+        for cluster in clusters
+            signature = (cluster.weight, cluster.total_loops, sort(cluster.loop_ids), sort(collect(cluster.multiplicities)))
+            if !haskey(clusters_by_signature, signature)
+                clusters_by_signature[signature] = []
+            end
+            push!(clusters_by_signature[signature], (site, cluster))
+        end
+    end
+
+    # Compute contributions for unique clusters
+    for (sig, cluster_list) in clusters_by_signature
+        cluster = cluster_list[1][2]  # Take first representative
+        contribution = cluster_contr(TN_normalized, messages, edges, links, adj_mat, cluster, all_loops)
+        if !isnan(contribution) && isfinite(contribution)
+            clustercorrx += Complex(contribution)  # Ensure complex arithmetic
+        end
+    end
+    return clustercorrx
+end 
 # No module exports needed for include-style usage
