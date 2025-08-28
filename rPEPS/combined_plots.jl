@@ -269,7 +269,8 @@ function plot_1_combined_error_vs_eta(cluster_results::Dict, loop_results::Dict)
         # Add log scale for y-axis
         plot!(p, yscale=:log10)
         
-        savefig(p, "combined_fe_error_vs_eta_N$N.png")
+        figs_dir = ensure_figs_dir()
+        savefig(p, joinpath(figs_dir, "combined_fe_error_vs_eta_N$N.png"))
         display(p)
         println("Saved: combined_fe_error_vs_eta_N$N.png")
     end
@@ -424,11 +425,20 @@ function plot_2_combined_error_vs_weight(cluster_results::Dict, loop_results::Di
         end
         
         # Save the plot
-        filename = "combined_error_vs_weight_multi_eta_N$(N).png"
+        figs_dir = ensure_figs_dir()
+        filename = joinpath(figs_dir, "combined_error_vs_weight_multi_eta_N$(N).png")
         savefig(p, filename)
         display(p)
         println("Saved: $filename")
     end
+end
+
+function ensure_figs_dir()
+    figs_dir = "figs"
+    if !isdir(figs_dir)
+        mkpath(figs_dir)
+    end
+    return figs_dir
 end
 
 # Main execution

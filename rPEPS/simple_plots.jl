@@ -9,7 +9,20 @@ Generates free energy per site error comparison plots:
 Compatible with old partition function errors and new free energy per site errors.
 """
 
-function load_results_simple(results_dir::String="cluster_correction_results")
+# Parse argument for mode
+function get_mode()
+    mode = "positive" # default
+    for arg in ARGS
+        if arg == "--complex"
+            mode = "complex"
+        elseif arg == "--positive"
+            mode = "positive"
+        end
+    end
+    return mode
+end
+
+function load_results_simple(results_dir::String="cluster_correction_results_complex")
     """
     Load and organize results from JLD2 files.
     Handles missing files gracefully.
@@ -46,12 +59,23 @@ function load_results_simple(results_dir::String="cluster_correction_results")
     return results
 end
 
+function ensure_figs_dir()
+    figs_dir = "figs"
+    if !isdir(figs_dir)
+        mkpath(figs_dir)
+    end
+    return figs_dir
+end
+
 function plot_1_error_vs_eta(results::Dict)
     """
     Plot 1: BP free energy per site error and cluster-corrected free energy per site errors vs η for different weights.
     Shows how cluster correction improves free energy per site accuracy across different η values.
     Separate plots for each N. Handles missing data gracefully.
     """
+    mode = get_mode()
+    suffix = mode
+    figs_dir = ensure_figs_dir()
     for N in sort(collect(keys(results)))
         p = plot(title="Free Energy per Site Error vs η (N=$N)", xlabel="η", ylabel="Free Energy per Site Error", 
                  legend=:topright, size=(800, 600), dpi=300)
@@ -146,10 +170,10 @@ function plot_1_error_vs_eta(results::Dict)
         # Add log scale for y-axis
         plot!(p, yscale=:log10)
         
-        savefig(p, "cluster_fe_error_vs_eta_N$N.png")
-        
+        filename = joinpath(figs_dir, "cluster_fe_error_vs_eta_N$(N)_$(suffix).png")
+        savefig(p, filename)
         display(p)
-        println("Saved: cluster_fe_error_vs_eta_N$N.png")
+        println("Saved: $(filename)")
     end
 end
 
@@ -158,6 +182,9 @@ function plot_2_error_vs_weight(results::Dict, η_array::Vector{Float64}=[0.1, 0
     Plot cluster-corrected errors as a function of cluster weight.
     Plots multiple η values on the same plot. Handles missing data gracefully.
     """
+    mode = get_mode()
+    suffix = mode
+    figs_dir = ensure_figs_dir()
     for N in sort(collect(keys(results)))
         # Find all available η values across all weights
         all_etas = []
@@ -272,20 +299,19 @@ function plot_2_error_vs_weight(results::Dict, η_array::Vector{Float64}=[0.1, 0
         end
         
         # Save the plot
-        filename = "cluster_error_vs_weight_multi_eta_N$(N).png"
+        filename = joinpath(figs_dir, "cluster_error_vs_weight_multi_eta_N$(N)_$(suffix).png")
         savefig(p, filename)
-        println("Saved plot: $filename")
+        println("Saved plot: $(filename)")
     end
 end
 
 # Main execution
 function main()
-    println("="^60)
-    println("🔄 Cluster Correction Plotting Script")
-    println("="^60)
-    
-    println("Loading results...")
-    results = load_results_simple()
+    mode = get_mode()
+    results_dir = mode == "complex" ? "cluster_correction_results_complex" : "cluster_correction_results_positive"
+    println("Loading results from $results_dir...")
+    results = load_results_simple(results_dir)
+    ensure_figs_dir()
     
     if isempty(results)
         println("❌ No cluster correction results found!")
@@ -312,12 +338,12 @@ function main()
     plot_1_error_vs_eta(results)
     
     println("\nGenerating Plot 2: Cluster Free Energy per Site Error vs weight...")
-    plot_2_error_vs_weight(results, [0.1, 0.3, 0.5,0.7, 0.9])  # Multiple η values
+    plot_2_error_vs_weight(results, [0.8])  # Multiple η values
     
     println("\n✅ Done! Check the generated PNG files.")
     println("Files generated:")
-    println("  - cluster_fe_error_vs_eta_N*.png")
-    println("  - cluster_error_vs_weight_multi_eta_N*.png")
+    println("  - cluster_fe_error_vs_eta_N*_complex.png")
+    println("  - cluster_error_vs_weight_multi_eta_N*_complex.png")
 end
 
 # Run the script

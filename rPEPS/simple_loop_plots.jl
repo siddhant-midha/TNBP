@@ -10,7 +10,20 @@ Generates free energy per site error comparison plots:
 Compatible with old partition function errors and new free energy per site errors.
 """
 
-function load_loop_results(results_dir::String="loop_correction_results")
+# Parse argument for mode
+function get_mode()
+    mode = "positive" # default
+    for arg in ARGS
+        if arg == "--complex"
+            mode = "complex"
+        elseif arg == "--positive"
+            mode = "positive"
+        end
+    end
+    return mode
+end
+
+function load_loop_results(results_dir::String)
     """
     Load and organize loop correction results from JLD2 files.
     Handles missing files gracefully.
@@ -47,12 +60,18 @@ function load_loop_results(results_dir::String="loop_correction_results")
     return results
 end
 
+function ensure_figs_dir()
+    figs_dir = "figs"
+    if !isdir(figs_dir)
+        mkpath(figs_dir)
+    end
+    return figs_dir
+end
+
 function plot_1_loop_error_vs_eta(loop_results::Dict)
-    """
-    Plot 1: BP free energy per site error and loop-corrected free energy per site errors vs η for different weights.
-    Shows how loop correction improves free energy per site accuracy across different η values.
-    Separate plots for each N. Handles missing data gracefully.
-    """
+    mode = get_mode()
+    suffix = mode
+    figs_dir = ensure_figs_dir()
     for N in sort(collect(keys(loop_results)))
         p = plot(title="Loop Correction: Free Energy per Site Error vs η (N=$N)", 
                  xlabel="η", ylabel="Free Energy per Site Error", 
@@ -140,18 +159,17 @@ function plot_1_loop_error_vs_eta(loop_results::Dict)
         # Add log scale for y-axis
         plot!(p, yscale=:log10)
         
-        savefig(p, "loop_fe_error_vs_eta_N$N.png")
-        
+        filename = joinpath(figs_dir, "loop_fe_error_vs_eta_N$(N)_$(suffix).png")
+        savefig(p, filename)
         display(p)
-        println("Saved: loop_pf_error_vs_eta_N$N.png")
+        println("Saved: $(filename)")
     end
 end
 
 function plot_2_loop_error_vs_weight(loop_results::Dict, η_array::Vector{Float64}=[0.1, 0.5, 0.8])
-    """
-    Plot 2: Free energy per site error vs weight order for multiple η values.
-    Shows BP vs loop corrections for different η values on the same plot.
-    """
+    mode = get_mode()
+    suffix = mode
+    figs_dir = ensure_figs_dir()
     for N in sort(collect(keys(loop_results)))
         # Find all available η values across all weights
         all_etas = []
@@ -250,16 +268,16 @@ function plot_2_loop_error_vs_weight(loop_results::Dict, η_array::Vector{Float6
         end
         
         # Save the plot
-        filename = "loop_error_vs_weight_multi_eta_N$(N).png"
+        filename = joinpath(figs_dir, "loop_error_vs_weight_multi_eta_N$(N)_$(suffix).png")
         savefig(p, filename)
-        println("Saved: $filename")
+        println("Saved: $(filename)")
     end
 end
 
 function plot_improvement_summary(loop_results::Dict)
-    """
-    Plot 3: Summary of loop correction improvement (BP free energy per site error - loop error).
-    """
+    mode = get_mode()
+    suffix = mode
+    figs_dir = ensure_figs_dir()
     for N in sort(collect(keys(loop_results)))
         p = plot(title="Loop Correction Improvement (N=$N)", 
                  xlabel="η", ylabel="Free Energy per Site Error Improvement (BP - Loop)",
@@ -308,20 +326,20 @@ function plot_improvement_summary(loop_results::Dict)
                    maximum([maximum(collect(keys(loop_results[N][w]))) for w in weights])], 
               [0, 0], color=:black, linestyle=:dot, alpha=0.5, label="No improvement")
         
-        savefig(p, "loop_fe_improvement_summary_N$N.png")
+        filename = joinpath(figs_dir, "loop_fe_improvement_summary_N$(N)_$(suffix).png")
+        savefig(p, filename)
         display(p)
-        println("Saved: loop_fe_improvement_summary_N$N.png")
+        println("Saved: $(filename)")
     end
 end
 
 # Main execution
 function main()
-    println("="^60)
-    println("🔄 Loop Correction Plotting Script")
-    println("="^60)
-    
-    println("Loading loop correction results...")
-    loop_results = load_loop_results()
+    mode = get_mode()
+    results_dir = mode == "complex" ? "loop_correction_results_complex" : "loop_correction_results"
+    println("Loading loop correction results from $results_dir...")
+    loop_results = load_loop_results(results_dir)
+    ensure_figs_dir()
     
     if isempty(loop_results)
         println("❌ No loop correction results found!")
@@ -355,9 +373,9 @@ function main()
     
     println("\n✅ Done! Check the generated PNG files.")
     println("Files generated:")
-    println("  - loop_fe_error_vs_eta_N*.png")
-    println("  - loop_error_vs_weight_multi_eta_N*.png") 
-    println("  - loop_fe_improvement_summary_N*.png")
+    println("  - loop_fe_error_vs_eta_N*_complex.png")
+    println("  - loop_error_vs_weight_multi_eta_N*_complex.png") 
+    println("  - loop_fe_improvement_summary_N*_complex.png")
 end
 
 # Run the script

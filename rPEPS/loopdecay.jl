@@ -57,7 +57,7 @@ for sample in 1:nsamples
     end
     
     # Get random PEPS tensor network for this η
-    tensors, _ = peps_controllable(N, T; η=η, ti=ti, orthog=orthog)
+    tensors, _ = peps_controllable(N, T; η=η, ti=ti, type="complex")
     adj_mat, edges, links = BP.get_adj_mat(tensors)
     messages = BP.get_messages(tensors, edges, links; random_part = 0.01) 
     messages = BP.message_passing(tensors, messages, edges, adj_mat; α=annealing, max_iters=maxiter, diagnose=false, normalise=true)
@@ -101,7 +101,7 @@ results = Dict(
 )
 
 # Create results directory if it doesn't exist
-results_dir = "loop_decay_results"
+results_dir = "loop_decay_results_complex"
 if !isdir(results_dir)
     mkdir(results_dir)
 end
