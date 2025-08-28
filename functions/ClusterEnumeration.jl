@@ -1190,6 +1190,26 @@ function cluster_contr_by_site(cluster_data, TN_normalized, messages, edges, lin
     return clustercorrx
 end 
 
+function cluster_contr_global(cluster_data, TN_normalized, messages, edges, links, adj_mat)
+    all_loops = cluster_data.all_loops  
+    clusters_by_site = cluster_data.clusters_by_site
+
+    unique_global_clusters = cluster_data["unique_global_clusters"]
+
+    clustercorrx = 0.0 + 0.0im  # Start with complex number
+
+    # Use pre-deduplicated unique global clusters
+    for cluster in unique_global_clusters
+        contribution = cluster_contr(T_normalized, messages, edges, links, adj_mat, cluster, all_loops)
+        if !isnan(contribution) && isfinite(contribution)
+            clustercorrx += Complex(contribution)  # Ensure complex arithmetic
+        end
+    end
+
+    return clustercorrx
+end 
+
+
 function load_latest_cluster_file(N, w;bc = "periodic", save_dir = "saved_clusters")
     if !isdir(save_dir)
         error("No saved_clusters directory found!")
@@ -1206,6 +1226,25 @@ function load_latest_cluster_file(N, w;bc = "periodic", save_dir = "saved_cluste
         deserialize(io)
     end
     return loaded_data["data"]
+end
+
+function load_global_cluster_file(N, w;bc = "periodic", save_dir = "saved_clusters")
+    if !isdir(save_dir)
+        error("No saved_clusters directory found!")
+    end
+    files = readdir(save_dir)
+    matching_files = filter(f -> endswith(f, ".jld2") && contains(f, "L$N") && contains(f, "w$w") && contains(f, "$bc"), files)
+    if isempty(matching_files)
+        error("No matching cluster file found for N=$N, w=$w in $save_dir!")
+    end
+    latest_file = sort(matching_files)[end]
+    filepath = joinpath(save_dir, latest_file)
+    println("📖 Loading cluster data from: $(latest_file)")
+    loaded_data = open(filepath, "r") do io
+        deserialize(io)
+    end
+
+    return loaded_data
 end
 
 # No module exports needed for include-style usage
