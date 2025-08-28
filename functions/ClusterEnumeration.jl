@@ -1189,4 +1189,23 @@ function cluster_contr_by_site(cluster_data, TN_normalized, messages, edges, lin
     end
     return clustercorrx
 end 
+
+function load_latest_cluster_file(N, w;bc = "periodic", save_dir = "saved_clusters")
+    if !isdir(save_dir)
+        error("No saved_clusters directory found!")
+    end
+    files = readdir(save_dir)
+    matching_files = filter(f -> endswith(f, ".jld2") && contains(f, "L$N") && contains(f, "w$w") && contains(f, "$bc"), files)
+    if isempty(matching_files)
+        error("No matching cluster file found for N=$N, w=$w in $save_dir!")
+    end
+    latest_file = sort(matching_files)[end]
+    filepath = joinpath(save_dir, latest_file)
+    println("📖 Loading cluster data from: $(latest_file)")
+    loaded_data = open(filepath, "r") do io
+        deserialize(io)
+    end
+    return loaded_data["data"]
+end
+
 # No module exports needed for include-style usage
