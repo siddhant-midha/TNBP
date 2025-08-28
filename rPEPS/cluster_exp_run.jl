@@ -28,38 +28,8 @@ function run_cluster_correction_analysis(N::Int, w::Int, η::Float64, nsamples::
     all_loops = nothing
     
     try
-        saved_data = load_latest_cluster_file(N, w)
-        cluster_data = saved_data
-        all_loops = cluster_data.all_loops
-        
-        # Try to load unique global clusters from the new format
-        try
-            # Load the full saved data to access unique_global_clusters
-            save_dir = "../saved_clusters"
-            files = readdir(save_dir)
-            matching_files = filter(f -> contains(f, "L$N") && contains(f, "w$w"), files)
-            latest_file = sort(matching_files)[end]
-            filepath = joinpath(save_dir, latest_file)
-            
-            full_saved_data = open(filepath, "r") do io
-                deserialize(io)
-            end
-            
-            if haskey(full_saved_data, "unique_global_clusters")
-                unique_global_clusters = full_saved_data["unique_global_clusters"]
-                println("✅ Loaded $(length(unique_global_clusters)) unique global clusters")
-            else
-                # Fallback to old method if unique_global_clusters not available
-                println("⚠️  unique_global_clusters not found, using clusters_by_site fallback")
-                clusters_by_site = cluster_data.clusters_by_site
-                unique_global_clusters = nothing
-            end
-        catch e
-            println("⚠️  Could not load unique_global_clusters: $e")
-            clusters_by_site = cluster_data.clusters_by_site
-            unique_global_clusters = nothing
-        end
-        
+        cluster_data = load_latest_cluster_file(N, w; bc = "open", save_dir = "../saved_clusters")
+        # Try to load unique global clusters from the new format        
         println("✅ Loaded cluster data successfully")
     catch e
         println("❌ Failed to load cluster data for N=$N, w=$w: $e")
@@ -107,42 +77,7 @@ function run_cluster_correction_analysis(N::Int, w::Int, η::Float64, nsamples::
             T_normalized = BP.normalize_tensors(tensors, Z_l)
             
             # Cluster correction using unique global clusters
-            clustercorrx = 0.0 + 0.0im  # Start with complex number
-            
-            if unique_global_clusters !== nothing
-                # Use pre-deduplicated unique global clusters
-                for cluster in unique_global_clusters
-                    contribution = cluster_contr(T_normalized, messages, edges, links, adj_mat, cluster, all_loops)
-                    if !isnan(contribution) && isfinite(contribution)
-                        clustercorrx += Complex(contribution)  # Ensure complex arithmetic
-                    end
-                end
-            else
-                # Fallback to old deduplication method
-                
-                # Deduplicate clusters manually (we know Set doesn't work)
-                clusters_by_signature = Dict{Tuple, Vector{Tuple{Int, Cluster}}}()
-                
-                for site in 1:(N*T)
-                    clusters = clusters_by_site[site]
-                    for cluster in clusters
-                        signature = (cluster.weight, cluster.total_loops, sort(cluster.loop_ids), sort(collect(cluster.multiplicities)))
-                        if !haskey(clusters_by_signature, signature)
-                            clusters_by_signature[signature] = []
-                        end
-                        push!(clusters_by_signature[signature], (site, cluster))
-                    end
-                end
-                
-                # Compute contributions for unique clusters
-                for (sig, cluster_list) in clusters_by_signature
-                    cluster = cluster_list[1][2]  # Take first representative
-                    contribution = cluster_contr(T_normalized, messages, edges, links, adj_mat, cluster, all_loops)
-                    if !isnan(contribution) && isfinite(contribution)
-                        clustercorrx += Complex(contribution)  # Ensure complex arithmetic
-                    end
-                end
-            end
+            clustercorrx = cluster_contr_by_site(cluster_data, T_normalized, messages, edges, links, adj_mat)
             
             cluster_FE_per_site_correction = clustercorrx / (N*T)
             corrected_FE_per_site = bp_FE_per_site + cluster_FE_per_site_correction

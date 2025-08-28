@@ -17,9 +17,9 @@ function run_loop_correction_analysis(N::Int, w::Int, η::Float64, nsamples::Int
     # Load loop data once
     cluster_data = nothing
     all_loops = nothing
-    
+
     try
-        cluster_data = load_latest_cluster_file(N, w)
+        cluster_data = load_latest_cluster_file(N, w; bc = "open", save_dir = "../saved_clusters")
         loop_objects = cluster_data.all_loops  
         all_loops = [loop_object.edges for loop_object in loop_objects]
         println("✅ Loaded loop data successfully ($(length(all_loops)) loops)")
@@ -27,7 +27,7 @@ function run_loop_correction_analysis(N::Int, w::Int, η::Float64, nsamples::Int
         println("❌ Failed to load loop data for N=$N, w=$w: $e")
         return nothing
     end
-    
+
     # Storage for results
     bp_errors = Float64[]           # Free energy per site errors
     loop_errors = Float64[]         # Free energy per site errors with loop correction

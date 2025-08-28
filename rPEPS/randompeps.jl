@@ -8,33 +8,6 @@ include("../functions/boundary_evolution.jl")
 push!(LOAD_PATH, "../functions/")
 using BP
 
-function load_latest_cluster_file(N,w)
-    """Load the most recent cluster enumeration file."""
-    save_dir = "../saved_clusters"
-    
-    if !isdir(save_dir)
-        error("No saved_clusters directory found!")
-    end
-    
-    # Look for files matching our criteria (weight 10, size 11, PBC)
-    files = readdir(save_dir)
-    
-    matching_files = filter(f -> contains(f, "L$N") && contains(f, "w$w"), files)
-    
-    latest_file = sort(matching_files)[end]
-    filepath = joinpath(save_dir, latest_file)
-    
-    println("📖 Loading cluster data from: $(latest_file)")
-    
-    loaded_data = open(filepath, "r") do io
-        deserialize(io)
-    end
-    
-    return loaded_data["data"]
-end
-
-
-
 function ortho(T::ITensor, v::Vector{Float64})
     indx = inds(T)
     n = length(indx)
@@ -47,7 +20,7 @@ function ortho(T::ITensor, v::Vector{Float64})
     return T 
 end 
 
-function controllable_tensor(i1_in, i2_in, i1_out, i2_out; η=0, orthog=false)
+function controllable_tensor(i1_in, i2_in, i1_out, i2_out; η=0, orthog=false, type="complex")
     """
     Creates a controllable 4-index tensor with adjustable rank-1 structure and positive entries.
     
@@ -61,36 +34,40 @@ function controllable_tensor(i1_in, i2_in, i1_out, i2_out; η=0, orthog=false)
            - η=0: Pure rank-1 tensor  
            - η>0: Mix of rank-1 + random components
         orthog: Whether to orthogonalize random component against rank-1 part (default: true)
+        type: positive or complex
     
     Returns:
         ITensor: A 4-index tensor with controllable structure and positive entries
     """
     
     # Generate base vector for rank-1 component with positive entries
-    vec = rand(dim(i1_in))
-    vec = abs.(vec)  # Ensure all entries are positive
+    vec = randn(ComplexF64, dim(i1_in))
     vec = vec / norm(vec)  # Normalize to unit length
+    if type == "positive"
+        vec = abs.(vec)  # Ensure all entries are positive
+    end 
     # Create rank-1 tensor: outer product of the same vector on all indices
-    # This creates a fully separable tensor T[i,j,k,l] = v[i] * v[j] * v[k] * v[l]
     fp = ITensor(vec, i1_in) * ITensor(vec, i2_in) * ITensor(vec, i1_out) * ITensor(vec, i2_out)
     fp = fp / norm(fp)  # Normalize the rank-1 component
     
-    # Create random component with positive entries
+    randomtensor = randomITensor(ComplexF64, i1_in, i2_in, i1_out, i2_out)
+    
     if orthog
         # Generate random tensor and orthogonalize it against the rank-1 vector
         # This ensures the random component is truly orthogonal to the rank-1 part
-        fm = ortho(randomITensor(i1_in, i2_in, i1_out, i2_out), vec)
+        fm = ortho(randomtensor, vec)
+    else
+        # Use completely random tensor with positive entries
+        fm = randomtensor
+    end
+
+    if type == "positive"
         # Make all entries positive after orthogonalization
         fm_array = Array(fm, i1_in, i2_in, i1_out, i2_out)
         fm_array = abs.(fm_array)
         fm = ITensor(fm_array, i1_in, i2_in, i1_out, i2_out)
-    else
-        # Use completely random tensor with positive entries
-        fm = randomITensor(i1_in, i2_in, i1_out, i2_out)
-        fm_array = Array(fm, i1_in, i2_in, i1_out, i2_out)
-        fm_array = abs.(fm_array)
-        fm = ITensor(fm_array, i1_in, i2_in, i1_out, i2_out)
-    end
+    end 
+
     fm = fm / norm(fm)  # Normalize the random component
     
     # Linear combination: interpolate between rank-1 and random structures

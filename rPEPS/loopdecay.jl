@@ -40,7 +40,7 @@ annealing = 0.75
 maxiter = 1000 
 
 # Load cluster data to get loop structures
-cluster_data = load_latest_cluster_file(N, wmax)
+cluster_data = load_latest_cluster_file(N, wmax; bc = "open", save_dir = "../saved_clusters")
 loop_objects = cluster_data.all_loops  # This contains loops of all weights up to wmax
 all_loops = [loop_object.edges for loop_object in loop_objects]
 
