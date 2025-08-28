@@ -36,7 +36,7 @@ end
 
 L = 5
 p_ar = 0:0.01:0.1  
-nsamples = 100
+nsamples = 20
 ler_ar = [LER(L, p; nsamples = nsamples) for p in p_ar]
 
 pl = plot(p_ar, ler_ar, marker=:square)

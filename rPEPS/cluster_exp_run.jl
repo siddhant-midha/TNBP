@@ -1,6 +1,4 @@
 include("randompeps.jl")
-include("cluster_exp.jl")
-using JLD2, FileIO, Dates, Statistics
 
 
 function run_cluster_correction_analysis(N::Int, w::Int, η::Float64, nsamples::Int)
@@ -28,7 +26,7 @@ function run_cluster_correction_analysis(N::Int, w::Int, η::Float64, nsamples::
     all_loops = nothing
     
     try
-        cluster_data = load_latest_cluster_file(N, w; bc = "open", save_dir = "../saved_clusters")
+        cluster_data = load_global_cluster_file(N, w; bc = "open", save_dir = "../saved_clusters")
         # Try to load unique global clusters from the new format        
         println("✅ Loaded cluster data successfully")
     catch e
@@ -39,9 +37,9 @@ function run_cluster_correction_analysis(N::Int, w::Int, η::Float64, nsamples::
     # Storage for results
     bp_errors = Float64[]           # Free energy per site errors
     cluster_errors = Float64[]      # Free energy per site errors with cluster correction
-    bp_fe_densities = Float64[]     # BP free energy per site values
-    exact_fe_densities = Float64[]  # Exact free energy per site values
-    cluster_corrections = Float64[] # FE density corrections (real parts)
+    bp_fe_densities = ComplexF64[]     # BP free energy per site values
+    exact_fe_densities = ComplexF64[]  # Exact free energy per site values
+    cluster_corrections = ComplexF64[] # FE density corrections ( parts)
     
     # Fixed parameters
     ti = true   
@@ -77,7 +75,7 @@ function run_cluster_correction_analysis(N::Int, w::Int, η::Float64, nsamples::
             T_normalized = BP.normalize_tensors(tensors, Z_l)
             
             # Cluster correction using unique global clusters
-            clustercorrx = cluster_contr_by_site(cluster_data, T_normalized, messages, edges, links, adj_mat)
+            clustercorrx = cluster_contr_global(cluster_data, T_normalized, messages, edges, links, adj_mat)
             
             cluster_FE_per_site_correction = clustercorrx / (N*T)
             corrected_FE_per_site = bp_FE_per_site + cluster_FE_per_site_correction
@@ -89,10 +87,17 @@ function run_cluster_correction_analysis(N::Int, w::Int, η::Float64, nsamples::
             # Store results
             push!(bp_errors, bp_error)
             push!(cluster_errors, cluster_error)
-            push!(bp_fe_densities, real(bp_FE_per_site))
-            push!(exact_fe_densities, real(exact_FE_per_site))
-            push!(cluster_corrections, real(cluster_FE_per_site_correction))
+            push!(bp_fe_densities, (bp_FE_per_site))
+            push!(exact_fe_densities, (exact_FE_per_site))
+            push!(cluster_corrections, (cluster_FE_per_site_correction))
             
+            # Debug output for first few samples
+            if sample <= 3
+                println("  Sample $sample debug:")
+                println("    BP FE error: $(bp_error)")
+                println("    Custer FE error: $(cluster_error)")
+            end
+
         catch e
             println("⚠️  Error in sample $sample: $e")
             continue
@@ -190,7 +195,7 @@ end
 w_list = [4, 6, 8, 10]  # Available cluster weights
 N_list = [5, 10]    # Available system sizes  
 η_list = [0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1.0]  # η values
-nsamples = 1      # Number of samples per combination
+nsamples = 10000      # Number of samples per combination
 
 # Get task ID from command line argument or environment variable
 task_id = nothing

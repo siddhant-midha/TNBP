@@ -1191,21 +1191,18 @@ function cluster_contr_by_site(cluster_data, TN_normalized, messages, edges, lin
 end 
 
 function cluster_contr_global(cluster_data, TN_normalized, messages, edges, links, adj_mat)
-    all_loops = cluster_data.all_loops  
-    clusters_by_site = cluster_data.clusters_by_site
-
+    all_loops = cluster_data["data"].all_loops  
     unique_global_clusters = cluster_data["unique_global_clusters"]
 
     clustercorrx = 0.0 + 0.0im  # Start with complex number
 
     # Use pre-deduplicated unique global clusters
     for cluster in unique_global_clusters
-        contribution = cluster_contr(T_normalized, messages, edges, links, adj_mat, cluster, all_loops)
+        contribution = cluster_contr(TN_normalized, messages, edges, links, adj_mat, cluster, all_loops)
         if !isnan(contribution) && isfinite(contribution)
             clustercorrx += Complex(contribution)  # Ensure complex arithmetic
         end
     end
-
     return clustercorrx
 end 
 

@@ -1,5 +1,4 @@
 include("randompeps.jl")
-using JLD2, FileIO, Dates, Statistics
 
 
 function run_loop_correction_analysis(N::Int, w::Int, η::Float64, nsamples::Int)

@@ -1,7 +1,7 @@
 using ITensors, ITensorMPS
 using ProgressMeter, LinearAlgebra
-using Statistics
 using Serialization
+using JLD2, FileIO, Dates, Statistics
 
 include("../functions/ClusterEnumeration.jl")
 include("../functions/boundary_evolution.jl")
@@ -81,7 +81,7 @@ function controllable_tensor(i1_in, i2_in, i1_out, i2_out; η=0, orthog=false, t
     return f
 end
 
-function peps_controllable(N, T; η=0, ti=true, orthog=true)
+function peps_controllable(N, T; η=0, ti=true, orthog=false, type="complex")
     ## if ti = true all tensors are identical, else all random, different
     ## if return_peps = true returns the peps matrix, else returns the tensors list
     χ = 2
@@ -89,7 +89,7 @@ function peps_controllable(N, T; η=0, ti=true, orthog=true)
     hinds = [Index(χ, "n$(n)h$(t)") for n in 1:N-1, t in 1:T]
 
     down, up, left, right = Index(2,"down"), Index(2,"up"), Index(2,"left"), Index(2,"right")
-    tens_main = controllable_tensor(down, up, left, right; η=η, orthog=orthog)
+    tens_main = controllable_tensor(down, up, left, right; η=η, orthog=orthog, type=type)
 
     tensors = []
     peps = Matrix{ITensor}(undef, T, N)
@@ -99,7 +99,7 @@ function peps_controllable(N, T; η=0, ti=true, orthog=true)
                 tens = copy(tens_main)
             else 
                 down, up, left, right = Index(2,"down"), Index(2,"up"), Index(2,"left"), Index(2,"right")
-                tens = controllable_tensor(down, up, left, right; η=η, orthog=orthog)
+                tens = controllable_tensor(down, up, left, right; η=η, orthog=orthog, type=type)
             end 
             # Vertical connections (up/down)
             if t == 1
