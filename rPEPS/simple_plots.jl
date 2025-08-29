@@ -338,7 +338,7 @@ function main()
     plot_1_error_vs_eta(results)
     
     println("\nGenerating Plot 2: Cluster Free Energy per Site Error vs weight...")
-    plot_2_error_vs_weight(results, [0.8])  # Multiple η values
+    plot_2_error_vs_weight(results, [0.1,0.2,0.3])  # Multiple η values
     
     println("\n✅ Done! Check the generated PNG files.")
     println("Files generated:")

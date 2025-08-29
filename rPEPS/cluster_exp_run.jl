@@ -58,7 +58,7 @@ function run_cluster_correction_analysis(N::Int, w::Int, η::Float64, nsamples::
         
         try
             # Generate random PEPS
-            tensors, peps = peps_controllable(N, T; η=η, ti=ti, type="complex")
+            tensors, peps = peps_controllable(N, T; η=η, ti=ti, type="positive")
             exact_PF = contract_peps_no_phys(peps; cutoff=1E-12, maxdim=2^N)
             exact_FE_per_site = log(Complex(exact_PF)) / (N*T)  # Complex log to handle any edge cases
             
@@ -170,7 +170,7 @@ function get_parameter_combination(task_id::Int, N_list::Vector{Int}, w_list::Ve
     return N_list[N_idx], w_list[w_idx], η_list[η_idx]
 end
 
-function save_results(results::Dict, save_dir::String="cluster_correction_results_complex")
+function save_results(results::Dict, save_dir::String="cluster_correction_results_positive")
     """
     Save results to a JLD2 file in the specified directory.
     """

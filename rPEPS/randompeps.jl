@@ -20,7 +20,7 @@ function ortho(T::ITensor, v::Vector{Float64})
     return T 
 end 
 
-function controllable_tensor(i1_in, i2_in, i1_out, i2_out; η=0, orthog=false, type="complex")
+function controllable_tensor(i1_in, i2_in, i1_out, i2_out; η=0, orthog=false, type="positive")
     """
     Creates a controllable 4-index tensor with adjustable rank-1 structure and positive entries.
     
@@ -34,30 +34,41 @@ function controllable_tensor(i1_in, i2_in, i1_out, i2_out; η=0, orthog=false, t
            - η=0: Pure rank-1 tensor  
            - η>0: Mix of rank-1 + random components
         orthog: Whether to orthogonalize random component against rank-1 part (default: true)
-        type: positive or complex
+        type: positive or complex or real
     
     Returns:
         ITensor: A 4-index tensor with controllable structure and positive entries
     """
     
     # Generate base vector for rank-1 component with positive entries
-    vec = randn(ComplexF64, dim(i1_in))
+    if type == "complex"
+        vec = randn(ComplexF64, dim(i1_in))
+    else
+        vec = randn(Float64, dim(i1_in))
+    end 
+
     vec = vec / norm(vec)  # Normalize to unit length
+
     if type == "positive"
         vec = abs.(vec)  # Ensure all entries are positive
     end 
+
     # Create rank-1 tensor: outer product of the same vector on all indices
     fp = ITensor(vec, i1_in) * ITensor(vec, i2_in) * ITensor(vec, i1_out) * ITensor(vec, i2_out)
     fp = fp / norm(fp)  # Normalize the rank-1 component
     
-    randomtensor = randomITensor(ComplexF64, i1_in, i2_in, i1_out, i2_out)
+    if type == "complex"
+        randomtensor = randomITensor(ComplexF64, i1_in, i2_in, i1_out, i2_out)
+    else
+        randomtensor = randomITensor(Float64, i1_in, i2_in, i1_out, i2_out)
+    end 
+
     
     if orthog
         # Generate random tensor and orthogonalize it against the rank-1 vector
         # This ensures the random component is truly orthogonal to the rank-1 part
         fm = ortho(randomtensor, vec)
     else
-        # Use completely random tensor with positive entries
         fm = randomtensor
     end
 
@@ -103,10 +114,10 @@ function peps_controllable(N, T; η=0, ti=true, orthog=false, type="complex")
             end 
             # Vertical connections (up/down)
             if t == 1
-                tens *= ITensor([1.,1.] ./ sqrt(2), down)
+                tens *= ITensor(ComplexF64, [1.,1.] ./ sqrt(2), down)
                 tens *= delta(up, vinds[n, t])
             elseif t == T
-                tens *= ITensor([1.,1.] ./ sqrt(2), up)
+                tens *= ITensor(ComplexF64, [1.,1.] ./ sqrt(2), up)
                 tens *= delta(down, vinds[n, t - 1])
             else
                 tens *= delta(down, vinds[n, t - 1])
@@ -115,10 +126,10 @@ function peps_controllable(N, T; η=0, ti=true, orthog=false, type="complex")
 
             # Horizontal connections (left/right)
             if n == 1
-                tens *= ITensor([1.,1.] ./ sqrt(2), left)
+                tens *= ITensor(ComplexF64, [1.,1.] ./ sqrt(2), left)
                 tens *= delta(right, hinds[n, t])
             elseif n == N
-                tens *= ITensor([1.,1.] ./ sqrt(2), right)
+                tens *= ITensor(ComplexF64, [1.,1.] ./ sqrt(2), right)
                 tens *= delta(left, hinds[n - 1, t])
             else
                 tens *= delta(left, hinds[n - 1, t])
