@@ -6,7 +6,7 @@
 #SBATCH --mem=4G
 #SBATCH --output=logs/loop_corr_%A_%a.out
 #SBATCH --error=logs/loop_corr_%A_%a.err
-#SBATCH --array=1-120
+#SBATCH --array=1-80
 #SBATCH --time=10:00:00
 #SBATCH --mail-type=end
 #SBATCH --mail-user=sm7456@princeton.edu
