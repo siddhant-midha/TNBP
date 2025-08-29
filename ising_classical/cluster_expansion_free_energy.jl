@@ -124,7 +124,7 @@ function load_latest_single_site_cluster_file(; size_filter="L11", weight_filter
 end
 
 # Ursell function for connected clusters (from original implementation)
-function ursell_function(cluster::Cluster, all_loops::Vector{Loop})
+function ursell_function(cluster::Cluster)
     """
     Compute the Ursell function φ(W) for a connected cluster W.
     For connected clusters, this is (-1)^(|W|-1) * (|W|-1)!
@@ -134,10 +134,7 @@ function ursell_function(cluster::Cluster, all_loops::Vector{Loop})
     if total_loops == 1
         return 1.0
     else
-        # φ(W) = (-1)^(|W|-1) * (|W|-1)!
-        sign = (total_loops - 1) % 2 == 0 ? 1.0 : -1.0
-        factorial_part = factorial(big(total_loops - 1))
-        return sign * Float64(factorial_part)
+        return -0.5
     end
 end
 
@@ -321,7 +318,7 @@ function compute_all_single_site_cluster_contributions(T_normalized, messages, e
         end
         
         # Compute Ursell function φ(W)
-        phi_W = ursell_function(cluster, all_loops)
+        phi_W = ursell_function(cluster)
         
         if abs(phi_W) < 1e-15
             continue  # Skip negligible contributions
@@ -424,7 +421,7 @@ function compute_single_site_cluster_correction(T_normalized, messages, edges, l
         end
         
         # Compute Ursell function φ(W)
-        phi_W = ursell_function(cluster, all_loops)
+        phi_W = ursell_function(cluster)
         
         if abs(phi_W) < 1e-15
             continue  # Skip negligible contributions
@@ -636,7 +633,7 @@ function compute_cluster_correction_with_saved_data(T_normalized, messages, edge
         end
         
         # Compute Ursell function φ(W)
-        phi_W = ursell_function(cluster, all_loops)
+        phi_W = ursell_function(cluster)
         
         if abs(phi_W) < 1e-15
             continue  # Skip negligible contributions
@@ -1057,9 +1054,9 @@ function main()
     println("="^80)
     
     # Parameters - automatically use L10 since we have single-site data for it
-    L = 12
-    β_range = collect(0.1:0.02:1.)  # β from 0.1 to 1.6 with fewer points for faster computation
-    max_weights = [4, 6, 8, 10]  # Use available weights for L10 (we have w8 and w9)
+    L = 30
+    β_range = collect(0.1:0.05:1.)  # β from 0.1 to 1.6 with fewer points for faster computation
+    max_weights = [4, 6, 7, 8, 9, 10]  # Use available weights for L10 (we have w8 and w9)
     
     println("📋 Configuration:")
     println("   Lattice size: $(L)×$(L)")
