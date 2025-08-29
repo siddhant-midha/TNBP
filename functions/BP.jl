@@ -278,7 +278,7 @@ function get_messages(tensors,edges,links;random_part=0)
     for (e, edge) in enumerate(edges) 
         v1, v2 = edge 
         index = links[e]
-        messages[v1, v2] = delta(ComplexF64, index) + random_part * randomITensor(index)
+        messages[v1, v2] = delta(ComplexF64, index) + random_part * randomITensor(index) 
         messages[v2, v1] = delta(ComplexF64, index) + random_part * randomITensor(index)
         messages[v1, v2] = messages[v1, v2] / norm(messages[v1, v2])
         messages[v2, v1] = messages[v2, v1] / norm(messages[v2, v1])
@@ -366,7 +366,6 @@ function message_passing(tensors,messages,edges,adj_mat;α=1,noise=0,max_iters=1
     while Δ > 1e-12 && iters < max_iters
         iters += 1 
         δ = 0 
-        
         # Forward pass: update v1 → v2 for each edge
         for e in edges 
             v1, v2 = e 
@@ -440,7 +439,7 @@ function excited_edge(edge,messages,edges,links)
     for n in 1:dim(index)
         iden[index=>n, prime(index)=>n] = 1.0 + 0im  # Fill diagonal with ComplexF64 1s
     end
-    return iden - (prime(messages[v1,v2]) * messages[v2,v1]) / (messages[v1,v2] * messages[v2,v1]) 
+    return iden - (prime(messages[v1,v2]) * messages[v2,v1]) / scalar(conj(messages[min(v1,v2),max(v1,v2)]) * messages[max(v1,v2),min(v1,v2)])
                                             ## convention: in the excited edge, the daggered index is v1 -> v2 with v1 < v2
                                             ## so the corresponding index on T[v2] needs to be primed
 end
@@ -604,7 +603,7 @@ function get_fixed_point_list(tensors,messages,adj_mat)
         nbrs = get_nbrs(adj_mat, index)
         Z_local = tensors[index] 
         for nbr in nbrs
-            Z_local *= messages[nbr,index] / sqrt(scalar(messages[nbr,index] * messages[index,nbr])) 
+            Z_local *= messages[nbr,index] / sqrt(scalar(conj(messages[min(nbr,index),max(nbr,index)]) * messages[max(nbr,index),min(nbr,index)]))  ##
         end
         @assert isempty(inds(Z_local))  "T[$index] must be a scalar"
         push!(Z_list,scalar(Z_local))
