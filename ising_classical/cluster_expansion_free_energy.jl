@@ -11,7 +11,7 @@ include("../dependencies.jl")
 include("../functions/ClusterEnumeration.jl")
 include("../functions/Ising2D.jl")
 include("../functions/BP.jl")
-include("../test/test_utils.jl")
+# include("../test/test_utils.jl") ## removing this because test utils contains duplication of the same functions used here
 using Serialization
 using Plots
 using ITensors, Graphs
@@ -58,12 +58,11 @@ function load_cluster_data(filepath::String)
     return data, summary
 end
 
-function load_latest_single_site_cluster_file(; size_filter="L11", weight_filter="", boundary_filter="periodic")
+function load_latest_single_site_cluster_file(; size_filter="L11", weight_filter="", boundary_filter="periodic", save_dir = "../saved_clusters")
     """
     Load the most recent single-site cluster enumeration file matching criteria.
     Returns the data and filename for reference.
     """
-    save_dir = "../saved_clusters"
     
     if !isdir(save_dir)
         error("No saved_clusters directory found!")
@@ -815,7 +814,7 @@ function plot_free_energy_vs_beta_with_single_site_clusters_efficient(L::Int, β
         
         # First try to load any weight that meets our requirement
         try
-            cluster_data, cluster_filename = load_latest_single_site_cluster_file(size_filter="L$L")
+            cluster_data, cluster_filename = load_latest_single_site_cluster_file(size_filter="L$L", weight_filter="w$(min_required_weight)")
             
             # Check if the loaded file has sufficient weight
             if cluster_data.max_weight >= min_required_weight
@@ -1054,9 +1053,9 @@ function main()
     println("="^80)
     
     # Parameters - automatically use L10 since we have single-site data for it
-    L = 30
-    β_range = collect(0.1:0.05:1.)  # β from 0.1 to 1.6 with fewer points for faster computation
-    max_weights = [4, 6, 7, 8, 9, 10]  # Use available weights for L10 (we have w8 and w9)
+    L = 6
+    β_range = collect(0.36:0.01:0.38)  # β from 0.1 to 1.6 with fewer points for faster computation
+    max_weights = [10]  # Use available weights for L10 (we have w8 and w9)
     
     println("📋 Configuration:")
     println("   Lattice size: $(L)×$(L)")

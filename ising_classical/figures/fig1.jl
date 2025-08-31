@@ -1,18 +1,15 @@
-include("clusters.jl")
-using FileIO
+include("helpers.jl")
 
-Ls = [6, 8, 10]
-alphas = [0.5,0.75, 1.0]
+
+Ls = [8, 10]
+alphas = LinRange(0.3,1.0,length(Ls))
 wts = [0,4,6,7,8,9,10]
 max_weight = maximum(wts)
-## Load these in the same dir.
-files = Dict{Int,String}()
-files[6] = "periodic_single_site_clusters_L6_site15_w10_periodic.jld2" 
-files[8] = "periodic_single_site_clusters_L8_site28_w10_periodic.jld2"
-files[10] = "periodic_single_site_clusters_L10_site45_w10_periodic.jld2"
 
-βs = [0.1,0.2,0.3,0.4,0.5,0.6,0.7,0.8]
-fig_dir = "figs"
+
+βs = [0.1,0.2,0.3,0.364,0.4,0.5,0.6,0.7,0.8]
+fig_dir = "fig1"
+
 if !isdir(fig_dir)
     mkpath(fig_dir)
 end
@@ -39,7 +36,7 @@ for β in βs
         loop_errors[1] = bp_error
         cluster_errors[1] = bp_error
 
-        cluster_corrs = cluster_expansion_2d_ising_with_single_site_clusters(L, max_weight, T_normalized, messages, BPedges, links, adj_mat, files[L])
+        cluster_corrs = get_cluster_contrb(L, max_weight, T_normalized, messages, BPedges, links, adj_mat)
         loop_corrs = loop_corrected_free_energy(L, T_normalized, messages, BPedges, links, adj_mat)
         for (i,w) in enumerate(wts)
             if i > 1
@@ -51,5 +48,5 @@ for β in βs
         plot!(p, wts, cluster_errors; label="Cluster L=$L", marker=:circle, color=:blue, linewidth=2, alpha=alphas[li])
         plot!(p, wts, loop_errors; label="Loop L=$L", marker=:square, color=:red, linewidth=2, alpha=alphas[li])
     end
-    savefig(p, joinpath(fig_dir, "error_vs_weight_beta_$(β).png"))
+    savefig(p, joinpath(fig_dir, "error_vs_weight_beta_$(β).pdf"))
 end

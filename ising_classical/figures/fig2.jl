@@ -1,9 +1,4 @@
-include("../../functions/ClusterEnumeration.jl")
-include("../../functions/Ising2D.jl")
-include("../../functions/BP.jl")
-include("../../functions/brute_force_new.jl")
-
-using Colors, Plots, Graphs, ITensors, Statistics
+include("helpers.jl")
 
 βs = vcat([0.2, 0.3], collect(LinRange(0.34, 0.4, 10)), [0.4, 0.44, 0.5, 0.6, 0.7, 0.8])
 
@@ -11,13 +6,8 @@ wts = [4,6,8,10]
 wmax = maximum(wts)
 color_grad = palette(:viridis, length(wts))
 
-files = Dict{Int,String}()
-files[6] = "periodic_clusters_L6_w$(wmax).jld2" 
-files[8] = "periodic_clusters_L8_w$(wmax).jld2" 
-files[10] = "periodic_clusters_L10_w$(wmax).jld2" 
 
-
-fig_dir = "figs"
+fig_dir = "fig2"
 if !isdir(fig_dir)
     mkpath(fig_dir)
 end
@@ -26,10 +16,8 @@ Ls = [6,8,10]
 for L in Ls
     N = 2 * L^2
     p = plot(; xlabel="β", ylabel="Mean loop contribution", title="Mean Loop Contribution vs β for different loop orders, L=$L", legend=:topright, yscale=:log10)
-    loaded_data = open(files[L], "r") do io
-        deserialize(io)
-    end
-    cluster_data = loaded_data["data"]
+
+    cluster_data, cluster_filename = load_latest_single_site_cluster_file(; size_filter="L$(L)", weight_filter="w$(wmax)", boundary_filter="periodic", save_dir = "../../saved_clusters")
     loop_objects = cluster_data.all_loops
     all_loops = [loop_object.edges for loop_object in loop_objects]
 
@@ -65,5 +53,5 @@ for L in Ls
         end
         plot!(p, βs, mean_contribs; label="Loop order $wt", color=color_grad[wi], marker=:circle, linewidth=2)
     end
-    savefig(p, joinpath(fig_dir, "mean_loop_contribution_vs_beta_L$(L).png"))
+    savefig(p, joinpath(fig_dir, "mean_loop_contribution_vs_beta_L$(L).pdf"))
 end
