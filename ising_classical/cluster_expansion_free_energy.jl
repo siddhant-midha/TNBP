@@ -358,7 +358,7 @@ function compute_all_single_site_cluster_contributions(T_normalized, messages, e
         # Add contribution to free energy density
         # For free energy: f = -log(Z), so correction is φ(W) * Z_W, but we want the contribution to f
         # The contribution to log(Z) is φ(W) * Z_W, so contribution to f is -φ(W) * Z_W / 2.0
-        contribution = -phi_W * Z_W / 2.0  # Factor of 2 comes from Ising model convention
+        contribution = -phi_W * Z_W ####   / 2.0  # Factor of 2 comes from Ising model convention
         
         # Store contribution details
         contrib_info = Dict(

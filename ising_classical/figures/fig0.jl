@@ -1,4 +1,6 @@
 include("helpers.jl")
+using Plots
+default(fontfamily="Times New Roman")
 
 Ls = [10]
 wts = [0,4,6,8,10]
@@ -7,7 +9,7 @@ alphas = LinRange(0.2,1.0,length(wts))
 
 max_weight = maximum(wts)
 
-βs = collect(0.2:0.001:0.6)
+βs = collect(0.1:0.001:0.6)
 fig_dir = "fig0"
 if !isdir(fig_dir)
     mkpath(fig_dir)
@@ -15,10 +17,10 @@ end
 
 for (li, L) in enumerate(Ls)
     N = 2 * L^2
-    # Store free energies for each cluster order and exact
     cluster_FE_arr = zeros(length(wts), length(βs))
     exact_FE_arr = zeros(length(βs))
-    # Compute free energies
+    bp_FE_arr = zeros(length(βs))
+    abs_error_arr = zeros(length(βs))
     for (bi, β) in enumerate(βs)
         T = Ising2D.get_ising_tn(L, β)
         adj_mat, BPedges, links = BP.get_adj_mat(T)
@@ -27,46 +29,58 @@ for (li, L) in enumerate(Ls)
         Z_l = BP.get_fixed_point_list(T, messages, adj_mat)
         T_normalized = BP.normalize_tensors(T, Z_l)
         bp_FE_density = -sum(log.(real.(Z_l))) / N
-        exact_FE = Ising2D.free_energy(β) #/ β
+        exact_FE = Ising2D.free_energy(β)
+        bp_FE_arr[bi] = bp_FE_density
         exact_FE_arr[bi] = exact_FE
-
-        cluster_corrs = get_cluster_contrb(L, max_weight, T_normalized, messages, BPedges, links, adj_mat)
-        cluster_FE_arr[1, bi] = bp_FE_density  #/ β
-        for (i, w) in enumerate(wts)
-            if i > 1
-                cluster_FE_arr[i, bi] = (bp_FE_density + cluster_corrs[w])  #/ β
-            end
-        end
+        abs_error_arr[bi] = abs(bp_FE_density - exact_FE)
     end
 
-    # Plot free energies vs beta
-    p1 = plot(; xlabel="β", ylabel="Free Energy", title="Free Energy vs β, L=$L", legend=:topright)
-    plot!(p1, βs, exact_FE_arr; label="Exact", color=:black, linewidth=2)
-    for (i, w) in enumerate(wts)
-        plot!(p1, βs, cluster_FE_arr[i, :]; label="Cluster order $w", color=color_wts[i], linewidth=2)
-    end
-    savefig(p1, joinpath(fig_dir, "free_energy_vs_beta_L$(L).png"))
+    # Find the beta value where the error is maximum
+    max_error_idx = argmax(abs_error_arr)
+    max_error_beta = βs[max_error_idx]
+    max_error_value = abs_error_arr[max_error_idx]
+    
+    println("Maximum error occurs at β = $(max_error_beta)")
+    println("Maximum error value: $(max_error_value)")
+    
+    # Plot free energies and absolute error vs beta (dual y-axis)
+    # Free energies on left y-axis, error on right y-axis
+    p1 = plot(βs, exact_FE_arr, 
+             label="Onsager", color=:red, linewidth=2, 
+             fontfamily="Times New Roman", legend=:bottomleft)
+    plot!(p1, βs, bp_FE_arr, 
+         label="BP vacuum", color=:blue, linewidth=2, 
+         fontfamily="Times New Roman", ylabel="Free Energy")
+    
+    # Create a second y-axis for error (right side)
+    p1_right = twinx(p1) # Create the right y-axis
+    plot!(p1_right, βs, abs_error_arr, color=:grey, linewidth=2, 
+          fontfamily="Times New Roman", linestyle = :dash, legend=false)
+    
+    # Add vertical line at maximum error
+    # vline!(p1, [max_error_beta], color=:black, linestyle=:dot, label="Max error β=$(round(max_error_beta, digits=4))")
+    # vline!(p1_right, [max_error_beta], color=:black, linestyle=:dot, label="")
+    
+    savefig(p1, joinpath(fig_dir, "free_energy_and_error_vs_beta_L$(L).pdf"))
 
     # Compute second derivative w.r.t. beta (numerical)
     d2_exact = [NaN; diff(diff(exact_FE_arr)) ./ (diff(βs)[1])^2]
-
-    # Compute second derivatives for cluster orders, avoiding reshape error
-    d2_cluster = zeros(length(wts), length(βs))
-    for i in 1:length(wts)
-        # Second derivative for cluster order i
-        d2_vals = [NaN; diff(diff(cluster_FE_arr[i, :])) ./ (diff(βs)[1])^2]
-        # Pad to length(βs) with NaN if needed
-        if length(d2_vals) < length(βs)
-            d2_vals = vcat(d2_vals, fill(NaN, length(βs) - length(d2_vals)))
-        end
-        d2_cluster[i, :] .= d2_vals
+    d2_bp = [NaN; diff(diff(bp_FE_arr)) ./ (diff(βs)[1])^2]
+    # Pad to length(βs) with NaN if needed
+    if length(d2_exact) < length(βs)
+        d2_exact = vcat(d2_exact, fill(NaN, length(βs) - length(d2_exact)))
+    end
+    if length(d2_bp) < length(βs)
+        d2_bp = vcat(d2_bp, fill(NaN, length(βs) - length(d2_bp)))
     end
 
     # Plot second derivative vs beta
-    p2 = plot(; xlabel="β", ylabel="d²F/dβ²", title="Second Derivative of Free Energy vs β, L=$L", legend=:topright)
-    plot!(p2, βs, d2_exact; label="Exact", color=:black, linewidth=2)
-    for (i, w) in enumerate(wts)
-        plot!(p2, βs, d2_cluster[i, :]; label="Cluster order $w", color=color_wts[i], linewidth=2)
-    end
+    p2 = plot(; legend=:topright, fontfamily="Times New Roman")
+    plot!(p2, βs, d2_exact; label="Onsager", color=:black, linewidth=2, fontfamily="Times New Roman")
+    plot!(p2, βs, d2_bp; label="BP vacuum", color=:blue, linewidth=2, fontfamily="Times New Roman")
+    
+    # Add vertical line at maximum error to second plot
+    vline!(p2, [max_error_beta], color=:black, linestyle=:dot, label="Max error β=$(round(max_error_beta, digits=4))")
+    
     savefig(p2, joinpath(fig_dir, "second_derivative_free_energy_vs_beta_L$(L).pdf"))
 end

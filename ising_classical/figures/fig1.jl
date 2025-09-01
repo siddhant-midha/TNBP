@@ -1,21 +1,21 @@
 include("helpers.jl")
 
 
-Ls = [8, 10]
+Ls = [10,20]
 alphas = LinRange(0.3,1.0,length(Ls))
-wts = [0,4,6,7,8,9,10]
+wts = [0,4,6,8,10]
 max_weight = maximum(wts)
 
+q = 3.89
+βs = [1/2 * log(q / (q-2))]#[0.2,1/2 * log(q / (q-2)),1/2 * log(1+sqrt(2)), 0.5]
 
-βs = [0.1,0.2,0.3,0.364,0.4,0.5,0.6,0.7,0.8]
 fig_dir = "fig1"
-
 if !isdir(fig_dir)
     mkpath(fig_dir)
 end
 
 for β in βs
-    p = plot(; xlabel="Max cluster/loop weight", ylabel="Error", yscale=:log10, legend=:topright, title="BP + Corrections Error vs Weight, β=$(β)")
+    p = plot(; yscale=:log10, legend=:topright, fontfamily="Times New Roman", xticks=(wts, string.(wts)))
     for (li, L) in enumerate(Ls)
         N = 2 * L^2
         T = Ising2D.get_ising_tn(L, β)
@@ -45,8 +45,8 @@ for β in βs
             end 
         end 
 
-        plot!(p, wts, cluster_errors; label="Cluster L=$L", marker=:circle, color=:blue, linewidth=2, alpha=alphas[li])
-        plot!(p, wts, loop_errors; label="Loop L=$L", marker=:square, color=:red, linewidth=2, alpha=alphas[li])
+        plot!(p, wts, cluster_errors; label="Cluster L=$L", marker=:circle, color=:blue, linewidth=2, alpha=alphas[li], fontfamily="Times New Roman")
+        plot!(p, wts, loop_errors; label="Loop L=$L", marker=:square, color=:red, linewidth=2, alpha=alphas[li], fontfamily="Times New Roman")
     end
-    savefig(p, joinpath(fig_dir, "error_vs_weight_beta_$(β).pdf"))
+    savefig(p, joinpath(fig_dir, "error_vs_weight_beta_$(round(β,digits=2)).pdf"))
 end

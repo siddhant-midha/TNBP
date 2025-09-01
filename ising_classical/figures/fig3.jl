@@ -1,7 +1,10 @@
 include("helpers.jl")
+using Plots
+default(fontfamily="Times New Roman")
 
-βs = [0.1, 0.2, 0.364, 1/2 * log(1+sqrt(2)),0.5]
-
+q = 3.9
+βs = collect(LinRange(0.1,1/2 * log(q / (q-2)),10)) #[0.1, 0.2, 1/2 * log(q / (q-2)), 1/2 * log(1+sqrt(2)),0.5]
+# βs = reverse(collect(LinRange(1/2 * log(q / (q-2)),0.7, 10)))
 wts = [4,6,8,10]
 wmax = maximum(wts)
 color_grad = palette(:viridis, length(βs))
@@ -12,10 +15,10 @@ if !isdir(fig_dir)
     mkpath(fig_dir)
 end
 
-Ls = [6,8,10]
+Ls = [10]
 for L in Ls
     N = 2 * L^2
-    p = plot(; xlabel="Loop weight", ylabel="Mean loop contribution", title="Mean Loop Contribution vs Loop Weight for different β, L=$L", legend=:topright, yscale=:log10)
+    p = plot(; legend=false, yscale=:log10, fontfamily="Times New Roman", xticks=(wts, string.(wts)))
 
     cluster_data, cluster_filename = load_latest_single_site_cluster_file(; size_filter="L$(L)", weight_filter="w$(wmax)", boundary_filter="periodic", save_dir = "../../saved_clusters")
     loop_objects = cluster_data.all_loops
@@ -51,7 +54,7 @@ for L in Ls
             mean_val = isempty(vals) ? NaN : mean(vals)
             push!(mean_contribs, mean_val)
         end
-        plot!(p, wts, mean_contribs; label="β=$(β)", color=color_grad[bi], marker=:circle, linewidth=2)
+        plot!(p, wts, mean_contribs;  color=color_grad[bi], marker=:circle, linewidth=2, fontfamily="Times New Roman")
     end
-    savefig(p, joinpath(fig_dir, "mean_loop_contribution_vs_weight_L$(L).pdf"))
+    savefig(p, joinpath(fig_dir, "mean_loop_contribution_vs_weight_L$(L)_βmin$(round(minimum(βs),digits=2))_βmax$(round(maximum(βs),digits=2)).pdf"))
 end

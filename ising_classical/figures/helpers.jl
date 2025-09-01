@@ -22,20 +22,19 @@ function get_cluster_contrb(L, max_weight, T_normalized, messages, edges, links,
 end 
 
 function loop_corrected_free_energy(L, T_normalized, messages, BPedges, BPlinks, BPadj_mat)
-    N = 2 * L^2
     correction_l = Dict{Int, ComplexF64}()
     Z = 1.
     Z += ZCorrection4th(BP.loop_contribution,L,L,messages,T_normalized,BPedges,BPlinks,BPadj_mat)
-    correction_l[4] = -log(Z)/N
+    correction_l[4] = -log(Z)/(1 * L^2)
     Z += ZCorrection6th(BP.loop_contribution,L,L,messages,T_normalized,BPedges,BPlinks,BPadj_mat)
-    correction_l[6] = -log(Z)/N
+    correction_l[6] = -log(Z)/(1 * L^2)
     Z += ZCorrection7th(BP.loop_contribution,L,L,messages,T_normalized,BPedges,BPlinks,BPadj_mat)
-    correction_l[7] = -log(Z)/N
+    correction_l[7] = -log(Z)/(1 * L^2)
     Z += ZCorrection8th(BP.loop_contribution,L,L,messages,T_normalized,BPedges,BPlinks,BPadj_mat)
-    correction_l[8] = -log(Z)/N
+    correction_l[8] = -log(Z)/(1 * L^2)
     Z += ZCorrection9th(BP.loop_contribution,L,L,messages,T_normalized,BPedges,BPlinks,BPadj_mat)
-    correction_l[9] = -log(Z)/N
+    correction_l[9] = -log(Z)/(1 * L^2)
     Z += ZCorrection10th(BP.loop_contribution,L,L,messages,T_normalized,BPedges,BPlinks,BPadj_mat)
-    correction_l[10] = -log(Z)/N
+    correction_l[10] = -log(Z)/(1 * L^2)
     return correction_l
 end

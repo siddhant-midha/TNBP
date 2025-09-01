@@ -1,10 +1,13 @@
 include("helpers.jl")
-
-βs = vcat([0.2, 0.3], collect(LinRange(0.34, 0.4, 10)), [0.4, 0.44, 0.5, 0.6, 0.7, 0.8])
+using Plots
+default(fontfamily="Times New Roman")
+q = 3.89
+βc = 1/2 * log(q / (q-2))
+βs = vcat([0.2, 0.3], collect(LinRange(0.34, 0.4, 10)), [0.4, 0.5, 0.6, 0.7, 0.8])
 
 wts = [4,6,8,10]
 wmax = maximum(wts)
-color_grad = palette(:viridis, length(wts))
+color_grad = palette(:plasma, length(wts))
 
 
 fig_dir = "fig2"
@@ -12,10 +15,10 @@ if !isdir(fig_dir)
     mkpath(fig_dir)
 end
 
-Ls = [6,8,10]
+Ls = [10]
 for L in Ls
     N = 2 * L^2
-    p = plot(; xlabel="β", ylabel="Mean loop contribution", title="Mean Loop Contribution vs β for different loop orders, L=$L", legend=:topright, yscale=:log10)
+    p = plot(; legend=:topright, yscale=:log10, fontfamily="Times New Roman")
 
     cluster_data, cluster_filename = load_latest_single_site_cluster_file(; size_filter="L$(L)", weight_filter="w$(wmax)", boundary_filter="periodic", save_dir = "../../saved_clusters")
     loop_objects = cluster_data.all_loops
@@ -51,7 +54,19 @@ for L in Ls
             mean_val = isempty(vals) ? NaN : mean(vals)
             push!(mean_contribs, mean_val)
         end
-        plot!(p, βs, mean_contribs; label="Loop order $wt", color=color_grad[wi], marker=:circle, linewidth=2)
+
+        # find beta where mean_contribs is maximal (ignore NaNs)
+        # tmp = [isnan(v) ? -Inf : v for v in mean_contribs]
+        # idx_max = argmax(tmp)
+        # beta_at_max = βs[idx_max]
+        # value_at_max = mean_contribs[idx_max]
+        # println("Loop weight $(wt): max mean contribution = $(value_at_max) at β = $(beta_at_max)")
+
+        plot!(p, βs, mean_contribs; label="Loop weight $wt", color=color_grad[wi], linewidth=2, fontfamily="Times New Roman")
     end
+
+    # Add vertical dashed line at critical beta (no legend entry)
+    vline!(p, [βc]; linestyle=:dash, color=:black, label=false)
+
     savefig(p, joinpath(fig_dir, "mean_loop_contribution_vs_beta_L$(L).pdf"))
 end
