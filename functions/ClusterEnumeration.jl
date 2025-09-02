@@ -121,6 +121,10 @@ function build_interaction_graph(loops::Vector{Loop})
     
     for i in 1:n_loops
         interaction_graph[i] = Int[]
+        
+        # Add self-loop first (every loop can interact with itself)
+        push!(interaction_graph[i], i)
+        
         for j in 1:n_loops
             if i != j
                 vertices1 = Set(loops[i].vertices)
@@ -162,6 +166,9 @@ function build_interaction_graph_optimized(loops::Vector{Loop})
     
     for i in 1:n_loops
         interaction_graph[i] = Int[]
+        
+        # Add self-loop first (every loop can interact with itself)
+        push!(interaction_graph[i], i)
         
         # Optimization 3: Only check loops that share at least one vertex
         candidate_loops = Set{Int}()
