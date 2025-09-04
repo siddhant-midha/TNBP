@@ -509,36 +509,40 @@ function main()
 end
 
 
-L = 20
-max_weights = [4,6,8] 
+# L = 20
+# max_weights = [4,6,8,10] 
 
-# a1 = sqrt(3/2); a2 = sqrt(6)
+# # a1 = sqrt(3/2); a2 = sqrt(6)
+# # save_path_error = "../visualization/aklt_error_vs_weight_L$(L)_a1$(a1)_a2$(a2).pdf"
+# # error_plot = plot_error_vs_weight(L, a1, a2, max_weights; 
+# #                                         save_path=save_path_error,
+# #                                         fontfamily="Times New Roman")
 
-a1 = 0.5
-a2_range = vcat(collect(0.5:0.1:0.9), collect(0.9:0.0025:1.1), collect(1.2:0.1:1.9), collect(1.9:0.01:2.1),collect(2.2:0.1:3.0))#collect(0.5:0.01:3.0) 
-save_path_a2 = "../visualization/aklt_cluster_expansion_vs_a2_L$(L).pdf"
-plot_a2, error_plot_a2 = plot_free_energy_vs_a2_with_single_site_clusters_efficient(
-            L, a1, a2_range, max_weights; save_path=save_path_a2)
-
-
-
-a1 = 0.5; a2 = 0.5
-save_path_error = "../visualization/aklt_error_vs_weight_L$(L)_a1$(a1)_a2$(a2).pdf"
-error_plot = plot_error_vs_weight(L, a1, a2, max_weights; 
-                                        save_path=save_path_error,
-                                        fontfamily="Times New Roman")
+# a1 = 0.5
+# a2_range = vcat(collect(0.5:0.1:0.9), collect(0.9:0.0025:1.1), collect(1.2:0.1:1.9), collect(1.9:0.01:2.1),collect(2.2:0.1:3.0)) 
+# save_path_a2 = "../visualization/aklt_cluster_expansion_vs_a2_L$(L).pdf"
+# plot_a2, error_plot_a2 = plot_free_energy_vs_a2_with_single_site_clusters_efficient(
+#             L, a1, a2_range, max_weights; save_path=save_path_a2)
 
 
-a1 = 0.5; a2 = 1.5
-save_path_error = "../visualization/aklt_error_vs_weight_L$(L)_a1$(a1)_a2$(a2).pdf"
-error_plot = plot_error_vs_weight(L, a1, a2, max_weights; 
-                                        save_path=save_path_error,
-                                        fontfamily="Times New Roman")
+
+# a1 = 0.5; a2 = 0.5
+# save_path_error = "../visualization/aklt_error_vs_weight_L$(L)_a1$(a1)_a2$(a2).pdf"
+# error_plot = plot_error_vs_weight(L, a1, a2, max_weights; 
+#                                         save_path=save_path_error,
+#                                         fontfamily="Times New Roman")
 
 
-a1 = 0.5; a2 = 5.0
-save_path_error = "../visualization/aklt_error_vs_weight_L$(L)_a1$(a1)_a2$(a2).pdf"
-error_plot = plot_error_vs_weight(L, a1, a2, max_weights; 
-                                        save_path=save_path_error,
-                                        fontfamily="Times New Roman")
+# a1 = 0.5; a2 = 1.5
+# save_path_error = "../visualization/aklt_error_vs_weight_L$(L)_a1$(a1)_a2$(a2).pdf"
+# error_plot = plot_error_vs_weight(L, a1, a2, max_weights; 
+#                                         save_path=save_path_error,
+#                                         fontfamily="Times New Roman")
+
+
+# a1 = 0.5; a2 = 5.0
+# save_path_error = "../visualization/aklt_error_vs_weight_L$(L)_a1$(a1)_a2$(a2).pdf"
+# error_plot = plot_error_vs_weight(L, a1, a2, max_weights; 
+#                                         save_path=save_path_error,
+#                                         fontfamily="Times New Roman")
 

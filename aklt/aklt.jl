@@ -2,7 +2,6 @@ using ITensors, ITensorMPS, Graphs, LinearAlgebra, Statistics
 include("../functions/ClusterEnumeration.jl")
 include("../functions/ctmrg.jl")
 
-
 function make_pair_combiner(ket::Index, bra::Index, combnd::Index)
     dket, dbra = dim(ket), dim(bra)
     @assert dim(combnd) == dket * dbra "Dimension mismatch: combnd must be dim(ket)*dim(bra)"
@@ -540,7 +539,6 @@ function cluster_expansion_aklt_with_single_site_clusters(L::Int, a1::Float64, a
     
     return results
 end
-
 function compute_all_single_site_cluster_contributions(T_normalized, messages, edges, links, adj_mat, 
                                                      cluster_data, L::Int, max_weight::Int)
     """
@@ -578,18 +576,18 @@ function compute_all_single_site_cluster_contributions(T_normalized, messages, e
         # Compute Ursell function φ(W)
         phi_W = ursell_function(cluster)
         
-        if abs(phi_W) < 1e-15
-            continue  # Skip negligible contributions
-        end
+        # if abs(phi_W) < 1e-24
+        #     continue  # Skip negligible contributions
+        # end
         
         # Compute cluster correction Z_W = ∏_i Z_{l_i}^{η_i}
         Z_W = 1.0 + 0im  # Complex number for cluster contribution
         computation_successful = true
-        
+        number_of_loops = 0
         for loop_id in cluster.loop_ids
             multiplicity = cluster.multiplicities[loop_id]
             loop = all_loops[loop_id]
-            
+            number_of_loops += multiplicity
             # Convert loop edges format for BP.jl (ensure v1 < v2 ordering)
             loop_edges_bp = Tuple{Int,Int}[]
             for edge in loop.edges
@@ -616,9 +614,14 @@ function compute_all_single_site_cluster_contributions(T_normalized, messages, e
         
         # Add contribution to free energy density
         # For free energy: f = -log(Z), so correction is φ(W) * Z_W, but we want the contribution to f
-        # The contribution to log(Z) is φ(W) * Z_W, so contribution to f is -φ(W) * Z_W
-        contribution = -phi_W * Z_W 
-        
+        contribution = -phi_W * Z_W
+        ## Temporary fix
+        if cluster.weight == 10 && number_of_loops == 2
+            contribution = contribution * 12
+        elseif cluster.weight == 8 && number_of_loops == 2
+            contribution = contribution * 9
+        end
+
         # Store contribution details
         contrib_info = Dict(
             "cluster_id" => i,
@@ -641,4 +644,3 @@ function compute_all_single_site_cluster_contributions(T_normalized, messages, e
     
     return cluster_contributions
 end
-
