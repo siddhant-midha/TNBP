@@ -462,7 +462,7 @@ function compute_single_site_cluster_correction(T_normalized, messages, edges, l
         # For free energy: f = -log(Z), so correction is φ(W) * Z_W, but we want the contribution to f
         # The contribution to log(Z) is φ(W) * Z_W, so contribution to f is -φ(W) * Z_W / (2*N)
         # But since we're computing per-site correction, we don't divide by N
-        contribution = -phi_W * Z_W / 2.0  # Factor of 2 comes from Ising model convention
+        contribution = -phi_W * Z_W / 1.0  # Factor of 2 comes from Ising model convention
         total_correction += contribution
         
         if abs(contribution) > 1e-10 && i <= 20
@@ -1059,9 +1059,10 @@ function main()
     println("="^80)
     
     # Parameters - automatically use L10 since we have single-site data for it
-    L = 6
-    β_range = collect(0.36:0.01:0.38)  # β from 0.1 to 1.6 with fewer points for faster computation
-    max_weights = [10]  # Use available weights for L10 (we have w8 and w9)
+    FACTOR = 1.0
+    L = 12
+    β_range = collect(0.3:0.0005:0.4)  # β from 0.1 to 1.6 with fewer points for faster computation
+    max_weights = [4, 6, 7, 8, 9, 10]  # Use available weights for L10 (we have w8 and w9)
     
     println("📋 Configuration:")
     println("   Lattice size: $(L)×$(L)")
