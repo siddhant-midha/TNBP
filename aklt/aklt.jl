@@ -1,6 +1,33 @@
 using ITensors, ITensorMPS, Graphs, LinearAlgebra, Statistics
-include("../functions/ClusterEnumeration.jl")
+# include("../functions/ClusterEnumeration.jl")
 include("../functions/ctmrg.jl")
+include("../functions/LoopEnumeration.jl")
+
+struct Cluster
+    loop_ids::Vector{Int}
+    multiplicities::Dict{Int, Int}
+    weight::Int
+    total_loops::Int
+end
+# Data structure for single-site enumeration results (copied from generate_ising_clusters_one_site.jl)
+struct SingleSiteClusterData
+    """Data structure to save single-site cluster enumeration results."""
+    clusters::Vector{Cluster}
+    all_loops::Vector{Loop}
+    adj_matrix::Matrix{Int}
+    max_weight::Int
+    lattice_size::Int
+    site::Int
+    enumeration_time::Float64
+    translation_removal_time::Float64
+    timestamp::String
+    boundary_condition::String
+    clusters_before_translation_removal::Int
+    clusters_after_translation_removal::Int
+    canonical_forms_count::Int
+end
+
+
 
 function make_pair_combiner(ket::Index, bra::Index, combnd::Index)
     dket, dbra = dim(ket), dim(bra)
@@ -103,7 +130,7 @@ function aklt_norm_tensor(indices; a1 = sqrt(3/2), a2 = sqrt(6))
         kB_, bB_ = decode(iB)
         kR_, bR_ = decode(iR)
         kT_, bT_ = decode(iT)
-        if (kL_ == bL_) && (kB_ == bB_)
+        if true # (kL_ == bL_) && (kB_ == bB_) ## fuck
             out_tensor[iL, iB, iR, iT] = sum([T_Wk[iPhys, kL_, kB_, kR_, kT_] * T_Wb[iPhys, bL_, bB_, bR_, bT_] for iPhys in 1:5])
         end 
     end
@@ -248,7 +275,7 @@ function dumbcontract(TN)
 end 
 
 
-function ctmrg_exact_FE_density(a1,a2; χmax = 32, cutoff = 1e-14, nsteps = 400)
+function ctmrg_exact_FE_density(a1,a2; χmax = 100, cutoff = 1e-10, nsteps = 1000)
     sₕ = Index(4, "Right")
     sᵥ = Index(4, "Top")
 
@@ -277,23 +304,6 @@ function ctmrg_exact_FE_density(a1,a2; χmax = 32, cutoff = 1e-14, nsteps = 400)
     return log(exact_PF_per_site)
 end 
 
-# Data structure for single-site enumeration results (copied from generate_ising_clusters_one_site.jl)
-struct SingleSiteClusterData
-    """Data structure to save single-site cluster enumeration results."""
-    clusters::Vector{Cluster}
-    all_loops::Vector{Loop}
-    adj_matrix::Matrix{Int}
-    max_weight::Int
-    lattice_size::Int
-    site::Int
-    enumeration_time::Float64
-    translation_removal_time::Float64
-    timestamp::String
-    boundary_condition::String
-    clusters_before_translation_removal::Int
-    clusters_after_translation_removal::Int
-    canonical_forms_count::Int
-end
 
 # Load saved cluster data
 function load_cluster_data(filepath::String)
