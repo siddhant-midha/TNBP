@@ -1,7 +1,13 @@
 using ITensors, ITensorMPS, Graphs, LinearAlgebra, Statistics
 # include("../functions/ClusterEnumeration.jl")
 include("../functions/ctmrg.jl")
-include("../functions/LoopEnumeration.jl")
+# include("../functions/LoopEnumeration.jl")
+
+struct Loop
+    vertices::Vector{Int}
+    edges::Vector{Tuple{Int,Int}}
+    weight::Int
+end
 
 struct Cluster
     loop_ids::Vector{Int}
@@ -9,6 +15,7 @@ struct Cluster
     weight::Int
     total_loops::Int
 end
+
 # Data structure for single-site enumeration results (copied from generate_ising_clusters_one_site.jl)
 struct SingleSiteClusterData
     """Data structure to save single-site cluster enumeration results."""
@@ -25,18 +32,6 @@ struct SingleSiteClusterData
     clusters_before_translation_removal::Int
     clusters_after_translation_removal::Int
     canonical_forms_count::Int
-end
-
-
-
-function make_pair_combiner(ket::Index, bra::Index, combnd::Index)
-    dket, dbra = dim(ket), dim(bra)
-    @assert dim(combnd) == dket * dbra "Dimension mismatch: combnd must be dim(ket)*dim(bra)"
-    C = ITensor(ket, bra, combnd)
-    for n in 1:dket, m in 1:dbra
-        C[ket=>n, bra=>m, combnd=>(m + (n-1)*dbra)] = 1.0
-    end
-    return C
 end
 
 function iσy(idx1, idx2)
@@ -89,13 +84,7 @@ function deformed_aklt_tensor(a1, a2; tag_prefix="")
         T_w[4, iLeft, iBottom, iRight, iTop] *= a1 / sqrt(3/2)
         T_w[5, iLeft, iBottom, iRight, iTop] *= a2 / sqrt(6) 
     end 
-    # Dt = ITensor(idx_phys, idx_phys_new)
-    # Dt[1, 1] = a2 / sqrt(6)
-    # Dt[2, 2] = a1 / sqrt(3/2)
-    # Dt[3, 3] = 1 
-    # Dt[4, 4] = a1 / sqrt(3/2)
-    # Dt[5, 5] = a2 / sqrt(6)
-    return T_w # * Dt
+    return T_w 
 end  
 
 function aklt_norm_tensor(indices; a1 = sqrt(3/2), a2 = sqrt(6))
@@ -275,7 +264,7 @@ function dumbcontract(TN)
 end 
 
 
-function ctmrg_exact_FE_density(a1,a2; χmax = 100, cutoff = 1e-10, nsteps = 1000)
+function ctmrg_exact_FE_density(a1,a2; χmax = 64, cutoff = 1e-14, nsteps = 500)
     sₕ = Index(4, "Right")
     sᵥ = Index(4, "Top")
 
@@ -455,7 +444,7 @@ function cluster_expansion_aklt_with_single_site_clusters(L::Int, a1::Float64, a
     println("\nStep 3: Computing BP fixed point...")
     messages = BP.get_messages(T, edges, links; random_part=0.1)
     messages = BP.message_passing(T, messages, edges, adj_mat; α=0.8, max_iters=1000)
-    println("✅ BP converged")
+    println("✅ BP converged: $(BP.check_self_consistency(T, messages, adj_mat))")
     
     # Get BP partition function (before normalization)
     Z_bp_full = BP.mean_free_partition_fn(1:N, T, messages, adj_mat)
@@ -549,7 +538,7 @@ function cluster_expansion_aklt_with_single_site_clusters(L::Int, a1::Float64, a
     
     return results
 end
-function compute_all_single_site_cluster_contributions(T_normalized, messages, edges, links, adj_mat, 
+function compute_all_single_site_cluster_contributions_aklt(T_normalized, messages, edges, links, adj_mat, 
                                                      cluster_data, L::Int, max_weight::Int)
     """
     Compute ALL cluster contributions once for single-site cluster data.
@@ -642,7 +631,7 @@ function compute_all_single_site_cluster_contributions(T_normalized, messages, e
         )
         push!(cluster_contributions, contrib_info)
         
-        if abs(contribution) > 1e-10 && i <= 20
+        if abs(contribution) > 1e-10 #&& i <= 20
             println("    Cluster $i (weight=$(cluster.weight)): φ=$phi_W, Z_W=$Z_W, f contribution=$contribution")
         end
     end

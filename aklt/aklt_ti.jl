@@ -9,11 +9,10 @@ and AKLT tensors instead of Ising tensors.
 """
 
 include("aklt.jl")
-include("../dependencies.jl")
-include("../functions/ClusterEnumeration.jl")
 include("../functions/BP.jl")
 using Serialization
 using Plots
+
 
 # Plot free energy vs a1 parameter using single-site clusters (EFFICIENT VERSION)
 function plot_free_energy_vs_a1_with_single_site_clusters_efficient(L::Int, a1_range::Vector{Float64}, a2::Float64,
@@ -98,7 +97,7 @@ function plot_free_energy_vs_a1_with_single_site_clusters_efficient(L::Int, a1_r
         push!(bp_f, f_bp)
         
         # Compute ALL cluster contributions once for this a1
-        cluster_contributions = compute_all_single_site_cluster_contributions(
+        cluster_contributions = compute_all_single_site_cluster_contributions_aklt(
             T_normalized, messages, edges, links, adj_mat, 
             cluster_data, L, max_weight_overall)
         
@@ -247,7 +246,7 @@ function plot_free_energy_vs_a2_with_single_site_clusters_efficient(L::Int, a1::
         push!(bp_f, f_bp)
         
         # Compute ALL cluster contributions once for this a2
-        cluster_contributions = compute_all_single_site_cluster_contributions(
+        cluster_contributions = compute_all_single_site_cluster_contributions_aklt(
             T_normalized, messages, edges, links, adj_mat, 
             cluster_data, L, max_weight_overall)
         
@@ -365,9 +364,9 @@ function plot_error_vs_weight(L::Int, a1::Float64, a2::Float64, max_weights::Vec
     
     # Compute BP fixed point
     println("📊 Computing BP fixed point...")
-    messages = BP.get_messages(T, edges, links; random_part=0.1)
-    messages = BP.message_passing(T, messages, edges, adj_mat; α=0.8, max_iters=1000)
-    
+    messages = BP.get_messages(T, edges, links; random_part=0.0)
+    messages = BP.message_passing(T, messages, edges, adj_mat; α=0.1, max_iters=5000)
+    println("✅ BP converged: $(BP.check_self_consistency(T, messages, adj_mat))")
     # Get BP partition function and free energy density
     Z_bp_full = BP.mean_free_partition_fn(1:N, T, messages, adj_mat)
     log_Z_bp_full = log(Complex(Z_bp_full))
@@ -382,7 +381,7 @@ function plot_error_vs_weight(L::Int, a1::Float64, a2::Float64, max_weights::Vec
     
     # Compute ALL cluster contributions once
     println("📊 Computing cluster contributions...")
-    cluster_contributions = compute_all_single_site_cluster_contributions(
+    cluster_contributions = compute_all_single_site_cluster_contributions_aklt(
         T_normalized, messages, edges, links, adj_mat, 
         cluster_data, L, maximum(max_weights))
     
@@ -424,99 +423,30 @@ function plot_error_vs_weight(L::Int, a1::Float64, a2::Float64, max_weights::Vec
     return p
 end
 
-# Main execution function
-function main()
-    println("🚀 AKLT Cluster Expansion Free Energy Calculator (Using Single-Site Clusters)")
-    println("="^80)
-    
-    # AKLT parameters
-    L = 10
-    # a1 = sqrt(3/2)
-    # a2 = sqrt(6)
-    a1 = 0.5
-    a2 = 0.2
-    # a1_range = collect(0.8:0.01:1.5)  # Range around sqrt(3/2) ≈ 1.225
-    # a2_range = collect(2.0:0.02:3.0)  # Range around sqrt(6) ≈ 2.449
-    a1_range = collect(0.25:0.025:0.75)  # Range around sqrt(3/2) ≈ 1.225
-    a2_range = collect(0.1:0.01:0.3)  # Range around sqrt(6) ≈ 2.449
-
-    max_weights = [4, 6, 7, 8, 9, 10]  # Use available weights
-    results = cluster_expansion_aklt_with_single_site_clusters(L, a1, a2; max_weights=max_weights)
-    
-    
-    exact_fe = results["exact_ctmrg"]
-    
-    for max_weight in max_weights
-        correction_data = results["cluster_corrections"][max_weight]
-        f_bp = correction_data["f_bp"]
-        f_corrected = correction_data["f_corrected"]
-        correction = correction_data["correction"]
-        
-        bp_error = abs(f_bp - exact_fe)
-        corrected_error = abs(f_corrected - exact_fe)
-        improvement = bp_error - corrected_error
-    end
-    
-    # Create parameter sweep plots
-    println("\n" * "="^80)
-    println("🎨 Creating parameter sweep plots...")
-    println("="^80)
-    
-    # Plot vs a1 parameter (varying a1, fixed a2)
-    println("\n📊 Creating plot vs a1 parameter...")
-    save_path_a1 = "../visualization/aklt_cluster_expansion_vs_a1_L$(L).pdf"
-    
-    try
-        plot_a1, error_plot_a1 = plot_free_energy_vs_a1_with_single_site_clusters_efficient(
-            L, a1_range, a2, max_weights; save_path=save_path_a1)
-        println("✅ a1 parameter plots created successfully!")
-    catch e
-        println("⚠️  Failed to create a1 plots: $e")
-    end
-    
-    # Plot vs a2 parameter (fixed a1, varying a2)
-    println("\n📊 Creating plot vs a2 parameter...")
-    save_path_a2 = "../visualization/aklt_cluster_expansion_vs_a2_L$(L).pdf"
-    
-    try
-        plot_a2, error_plot_a2 = plot_free_energy_vs_a2_with_single_site_clusters_efficient(
-            L, a1, a2_range, max_weights; save_path=save_path_a2)
-        println("✅ a2 parameter plots created successfully!")
-    catch e
-        println("⚠️  Failed to create a2 plots: $e")
-    end
-    
-    # Plot error vs weight
-    println("\n📊 Creating error vs weight plot...")
-    save_path_error = "../visualization/aklt_error_vs_weight_L$(L)_a1$(a1)_a2$(a2).pdf"
-    
-    try
-        error_plot = plot_error_vs_weight(L, a1, a2, max_weights; 
-                                         save_path=save_path_error,
-                                         fontfamily="Times New Roman")
-        println("✅ Error vs weight plot created successfully!")
-    catch e
-        println("⚠️  Failed to create error vs weight plot: $e")
-    end
-    
-    println("\n✅ All analysis complete!")
-    println("📊 Plots saved to:")
-    println("   a1 parameter sweep: $save_path_a1")
-    println("   a2 parameter sweep: $save_path_a2")
-    println("   error vs weight: $save_path_error")
-    
-    return results
-end
 
 
-# L = 20
-# max_weights = [4,6,8,10] 
+L = 20
+max_weights = [4,6,8,10] 
 
-# # a1 = sqrt(3/2); a2 = sqrt(6)
-# # save_path_error = "../visualization/aklt_error_vs_weight_L$(L)_a1$(a1)_a2$(a2).pdf"
-# # error_plot = plot_error_vs_weight(L, a1, a2, max_weights; 
-# #                                         save_path=save_path_error,
-# #                                         fontfamily="Times New Roman")
+# a1 = sqrt(3/2); a2 = sqrt(6)
+a1 = 0.5; a2 = 1.5
+
+# T = aklt_norm_network(L; a1=a1, a2=a2)
+# # Get adjacency structure
+# adj_mat, edges, links = BP.get_adj_mat(T)
+# # Compute BP fixed point
+# println("📊 Computing BP fixed point...")
+# messages = BP.get_messages(T, edges, links; random_part=0.01)
+# messages, arr = BP.message_passing(T, messages, edges, adj_mat; α=0.2, max_iters=4000, diagnose=true)
+# println("✅ BP converged: $(BP.check_self_consistency(T, messages, adj_mat))")
+# p = plot(arr)
+# display(p)
+# readline()
+
+save_path_error = "../visualization/aklt_error_vs_weight_L$(L)_a1$(a1)_a2$(a2).pdf"
+error_plot = plot_error_vs_weight(L, a1, a2, max_weights; 
+                                        save_path=save_path_error,
+                                        fontfamily="Times New Roman")
 
 # a1 = 0.5
 # a2_range = vcat(collect(0.5:0.1:0.9), collect(0.9:0.0025:1.1), collect(1.2:0.1:1.9), collect(1.9:0.01:2.1),collect(2.2:0.1:3.0)) 
